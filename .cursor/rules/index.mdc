@@ -1,0 +1,96 @@
+---
+alwaysApply: true
+---
+
+This project is a vscode/cursor extension paired with a living program that will track copy/paste information, and will relay source infromation within an ide. Please refer to the official cursor and vscode docs for API requests concerning extension development.
+
+VSCode Extension Api Documentation: 
+Cursor Extension Api Dcoumentation: 
+
+--------------------------------
+------- Components ------------
+--------------------------------
+
+System Architecture 
+ 
+
+Comp 1: IDE Extension: 
+
+Extension for Visual Studio/Cursor 
+Tracks edit by listening for onDidChangeTextDocument (https://code.visualstudio.com/api/references/vscode-api) 
+Log: 
+inserted text 
+deleted text 
+AI Generation 
+Cursor emits events for AI completions. 
+Ex) 
+source: cursor_ai 
+model: claude-3.7 
+prompt: <prompt text> 
+Pasted Code Detection(Using Clipboard Hook) 
+Comp 2: Clipboard Monitor/Hook 
+
+Background App on users machine that monitors clipboard events 
+Example flow: 
+User copies StackOverflow code 
+↓ 
+Clipboard listener records: 
+   source_url 
+   clipboard_hash 
+↓ 
+User pastes into IDE 
+↓ 
+Match pasted text to clipboard record 
+Result: origin = stackoverflow.com/12345 
+
+Component 3: AI API Proxy 
+
+Hook Directly into AI Plugins through IDE 
+Cursor Extension logs: 
+prompt 
+model 
+response 
+inserted code region 
+IDE extension for Cursor/Copilot/inline completions inside the editor 
+For: 
+Cursor 
+
+Copilot 
+
+… 
+
+Component 4: Brower Extension 
+
+Logs: 
+prompt text 
+response text 
+model name 
+URL 
+copy event 
+time 
+Example:  
+prompt = "write quicksort in python" 
+model = gpt-4.1 
+url = chat.openai.com 
+copied = True 
+
+Component 5: Behavior Analyzer 
+
+Processes logs from the IDE extension, browser extension, clipboard monitor, and AI interaction logger. 
+Reconstructs coding sessions from timestamped events. 
+Identifies code origin, such as AI-generated, AI-modified, human-written, or external paste. 
+Links prompts, responses, and inserted code to track AI-assisted coding flow. 
+Extracts session features such as AI usage ratio, paste ratio, edit frequency, typing speed, and model usage. 
+Classifies coding behavior, such as manual, AI-assisted, AI-heavy, or vibe coding. 
+Outputs structured results for evaluation and visualization. 
+Component 6: Visualization Dashboard 
+
+Displays analysis results from the Behavior Analyzer. 
+Shows coding timelines with prompts, responses, pastes, edits, and saves. 
+Highlights code origin by line, such as human, AI-generated, AI-modified, or external. 
+Visualizes key metrics such as AI usage, paste ratio, edit ratio, and model usage. 
+Supports comparison across sessions, users, and AI tools. 
+Generates charts and summaries for experiments and research reports. 
+ 
+
+ 
