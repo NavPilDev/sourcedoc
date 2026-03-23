@@ -59,12 +59,12 @@ Today `[SourceMarkers](c:\Users\Proba\Documents\Coding Projects\sourcedoc\source
 - Exposes `**onDidChange`** (`vscode.EventEmitter<void>` + public `event`) so both UI layers refresh.
 - Exposes `**getPastes(uri: vscode.Uri)`** (or string key) for the webview.
 
-`SourceMarkers` then takes the model in its constructor, subscribes to `onDidChange`, and `**refreshEditor` reads pastes via `model.getPastes**` instead of `this.pastesByUri`. Paste recording moves to the model (single source of truth).
+`SourceMarkers` then takes the model in its constructor, subscribes to `onDidChange`, and `**refreshEditor` reads pastes via `model.getPastes`** instead of `this.pastesByUri`. Paste recording moves to the model (single source of truth).
 
 ## New: Webview View provider
 
 - New file e.g. `[sourcedoc/src/sourceWebviewViewProvider.ts](c:\Users\Proba\Documents\Coding Projects\sourcedoc\sourcedoc\src\sourceWebviewViewProvider.ts)` implementing `WebviewViewProvider`.
-- `**resolveWebviewView**`: set `webview.options` (`enableScripts: true`, `localResourceRoots` limited to extension root if you add assets later).
+- `**resolveWebviewView`**: set `webview.options` (`enableScripts: true`, `localResourceRoots` limited to extension root if you add assets later).
 - **HTML**: inline template string (keeps webpack simple—no extra copy step) with:
   - Minimal CSS for a compact list (file name, line range, time, source label, truncated prompt history).
   - `acquireVsCodeApi()` + `window.addEventListener('message', ...)` to replace list body on updates.
