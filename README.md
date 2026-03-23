@@ -27,3 +27,4 @@ This will automatically update the /dist build folder with the changes so that t
   - Use the debug console to view debug logs and errors within this window
 4. Open up a new file/folder, and start coding.
 5. Copy Paste to see the changes reflected in the source doc interface(shown below).
+<img width="1206" height="561" alt="image" src="https://github.com/user-attachments/assets/237cc540-5890-42a2-bf9e-532729dc87be" />
