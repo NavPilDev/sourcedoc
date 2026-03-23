@@ -3,7 +3,7 @@
 The first version of SourceDoc needs to have the following:
 - Provide Sourcing of lines of code within a file
   - The extension should automatically listen for copy paste events from the user
-  - This should visually be represented with TextEditorDecorationService to visually highlight lines with markers
+  - This should visually be represented with TextEditorDecorationService to visually highlight code line(s) with markers
   - When the user hovers over the markers, a window should pop up showing:
   ```
   {
@@ -11,3 +11,4 @@ The first version of SourceDoc needs to have the following:
     Time: XX:XX
     Prompt History: (add some dummy text here)
   }
+  ```

@@ -9,9 +9,29 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sourcedoc",
+          "title": "SourceDoc",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "sourcedoc": [
+        {
+          "id": "sourcedoc.sourcePanel",
+          "name": "Current file",
+          "type": "webview"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "sourcedoc.source",

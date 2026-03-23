@@ -36,46 +36,30 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
-const logSink_1 = require("./logSink");
-const attribution_1 = require("./attribution");
-const pasteObserver_1 = require("./pasteObserver");
-const cursorHooks_1 = require("./cursorHooks");
-const editTracker_1 = require("./editTracker");
-const inlineOriginView_1 = require("./inlineOriginView");
-const config_1 = require("./config");
+const sourceMarkers_1 = require("./sourceMarkers");
 function activate(context) {
-    const output = vscode.window.createOutputChannel('SourceDoc');
-    output.appendLine('SourceDoc: tracking enabled (see settings: sourcedoc.*).');
-    const log = (0, logSink_1.createLogSink)(output);
-    const store = new attribution_1.DocumentOriginStore();
-    const pasteBuffer = new pasteObserver_1.PasteSignalBuffer(log);
-    const cursorHooks = new cursorHooks_1.CursorHooks(context, (0, config_1.getSourcedocConfig)().enableCursorHooks);
-    context.subscriptions.push(cursorHooks);
-    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('sourcedoc.enableCursorHooks')) {
-            cursorHooks.setEnabled((0, config_1.getSourcedocConfig)().enableCursorHooks);
+    const markers = new sourceMarkers_1.SourceMarkers();
+    context.subscriptions.push({ dispose: () => markers.dispose() });
+    context.subscriptions.push(vscode.workspace.onDidChangeTextDocument((e) => {
+        markers.handleDocumentChange(e);
+    }));
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor((editor) => {
+        if (editor) {
+            markers.refreshEditor(editor);
         }
     }));
-    const inlineView = new inlineOriginView_1.InlineOriginView(store);
-    inlineView.register(context);
-    context.subscriptions.push(inlineView);
-    context.subscriptions.push((0, pasteObserver_1.registerPasteObserver)(log, pasteBuffer));
-    (0, editTracker_1.registerEditTracker)(context, log, store, pasteBuffer, cursorHooks, () => inlineView.refresh());
+    context.subscriptions.push(vscode.workspace.onDidOpenTextDocument((doc) => {
+        const editor = vscode.window.visibleTextEditors.find((ed) => ed.document.uri.toString() === doc.uri.toString());
+        if (editor) {
+            markers.refreshEditor(editor);
+        }
+    }));
+    markers.refreshAllVisibleEditors();
     context.subscriptions.push(vscode.commands.registerCommand('sourcedoc.source', () => {
-        vscode.window.showInformationMessage('SourceDoc: use Output panel "SourceDoc" for JSONL edit logs.');
+        vscode.window.showInformationMessage('SourceDoc: paste tracking is active; paste code to record line sourcing.');
     }));
-    context.subscriptions.push(vscode.commands.registerCommand('sourcedoc.generate', async () => {
-        const answer = await vscode.window.showInformationMessage('SourceDoc: documentation generation is not implemented yet.', 'OK');
-        if (answer === 'OK') {
-            output.show(true);
-        }
-    }));
-    context.subscriptions.push(vscode.commands.registerCommand('sourcedoc.toggleDecorations', async () => {
-        const c = vscode.workspace.getConfiguration('sourcedoc');
-        const cur = c.get('showDecorations', true);
-        await c.update('showDecorations', !cur, vscode.ConfigurationTarget.Global);
-        vscode.window.showInformationMessage(`SourceDoc: inline decorations ${!cur ? 'on' : 'off'}`);
-        inlineView.refresh();
+    context.subscriptions.push(vscode.commands.registerCommand('sourcedoc.generate', () => {
+        vscode.window.showInformationMessage('SourceDoc: documentation generation is not implemented in Version 1.');
     }));
 }
 function deactivate() { }

@@ -1,35 +1,59 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import { SourcePasteModel } from './sourcePasteModel';
+import { SourceMarkers } from './sourceMarkers';
+import { SourceWebviewViewProvider } from './sourceWebviewViewProvider';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
+export function activate(context: vscode.ExtensionContext): void {
+	const model = new SourcePasteModel();
+	context.subscriptions.push(model);
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "sourcedoc" is now active!');
+	const markers = new SourceMarkers(model);
+	context.subscriptions.push(markers);
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	context.subscriptions.push(vscode.commands.registerCommand('sourcedoc.source', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage('We be sourcing from SourceDoc! fr');
-	}));
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(
+			'sourcedoc.sourcePanel',
+			new SourceWebviewViewProvider(context.extensionUri, model),
+			{ webviewOptions: { retainContextWhenHidden: true } }
+		)
+	);
 
-	context.subscriptions.push(vscode.commands.registerCommand('sourcedoc.generate', async () => {
-		const answer = await vscode.window.showInformationMessage('Generating documentation with SourceDoc!', "Let's go!", "Hell no");
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeTextDocument((e) => {
+			model.handleDocumentChange(e);
+		})
+	);
 
-		if (answer === "Let's go!") {
-			vscode.window.showInformationMessage('Generating documentation with SourceDoc!');
-		} else if (answer === "Hell no") {
-			vscode.window.showInformationMessage('fck u');
-		}
+	context.subscriptions.push(
+		vscode.window.onDidChangeActiveTextEditor((editor) => {
+			if (editor) {
+				markers.refreshEditor(editor);
+			}
+		})
+	);
 
-	}));
+	context.subscriptions.push(
+		vscode.workspace.onDidOpenTextDocument((doc) => {
+			const editor = vscode.window.visibleTextEditors.find((ed) => ed.document.uri.toString() === doc.uri.toString());
+			if (editor) {
+				markers.refreshEditor(editor);
+			}
+		})
+	);
+
+	markers.refreshAllVisibleEditors();
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('sourcedoc.source', () => {
+			vscode.window.showInformationMessage('SourceDoc: paste tracking is active; paste code to record line sourcing.');
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('sourcedoc.generate', () => {
+			vscode.window.showInformationMessage('SourceDoc: documentation generation is not implemented in Version 1.');
+		})
+	);
 }
 
-// This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate(): void {}

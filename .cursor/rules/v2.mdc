@@ -5,8 +5,9 @@ The 2nd version of SourceDoc needs to have the following:
   - When the user hovers over the markers, a window should pop up showing:
   ```
   {
-    Source: Human Copy-Paste (Stack Overflow)
+    Source: AI Generated Code
+    Model: (Show the model used from either Cursor Agent or VSCode Github Copilot)
     Time: XX:XX
-    Prompt History: (add some dummy text here)
+    Prompt History: (Show up to the last 5 prompts, including the one that generated this one )
   }
 
