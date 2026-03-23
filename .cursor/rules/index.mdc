@@ -5,7 +5,7 @@ alwaysApply: true
 This project is a vscode/cursor extension paired with a living program that will track copy/paste information, and will relay source infromation within an ide. Please refer to the official cursor and vscode docs for API requests concerning extension development.
 
 VSCode Extension Api Documentation: 
-Cursor Extension Api Dcoumentation: 
+VSCode Extension Samples: https://github.com/microsoft/vscode-extension-samples
 
 --------------------------------
 ------- Components ------------
@@ -93,4 +93,4 @@ Supports comparison across sessions, users, and AI tools.
 Generates charts and summaries for experiments and research reports. 
  
 
- 
+ VSCode Extension Samples: https://github.com/microsoft/vscode-extension-samples

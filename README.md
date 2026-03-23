@@ -1,0 +1,1 @@
+This project is a vscode/cursor extension paired with a living program that will track copy/paste information, and will relay source infromation within an ide. Please refer to the official cursor and vscode docs for API requests concerning extension development.

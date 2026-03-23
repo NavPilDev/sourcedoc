@@ -1,0 +1,4 @@
+sourcedoc/.vscode
+sourcedoc/.vscode-test
+sourcedoc/dist
+sourcedoc/node_modules
