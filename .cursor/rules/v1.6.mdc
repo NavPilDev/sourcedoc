@@ -1,0 +1,27 @@
+## Version 1.6 Implementation
+
+### Goal
+
+Fix errors and bugs that might cause confusion for anyone planning on using SourceDoc. Also add reconstruction of SourceDoc when an IDE closes and reopens.
+
+### SourceDoc Reconstruction and Saving
+Implement functionality to save and reconstruct sourceDoc for a file(s) within a codebase so that starting up an IDE with SourceDoc, does not make the user start on a blank slate each time. 
+- When a new CodeBlock is inserted into a document save its metadata to a json file within the extension.
+- This json metadata will allow for reconstruction on IDE startup of sourced documentation, so that no documentation is lost.
+
+### Errors and Bugs found
+
+- When Pasting a code block at the end of the document, the highlighted bounds extend when hitting enter at the end of the code block.
+- Code block bounds do not update if code is edited above or in between code blocks.
+- If code blocks are the same, the go to button goes to the same code block, instead of distinct ones.
+- If a code block gets deleted, then it should also be deleted from SourceDoc
+- CodeBlock bounds are not shown on the webview panel
+
+### Expected Result
+
+Version 1.5 should support:
+1. Pasting a code block at the end of a file, and then adding lines to the end of it manually, should not add to the bounds of the pasted code block. 
+2. Code block bounds should be updated properly depending on code added to a file
+3. Duplicate pasted code blocks should not link to one code block. The webview should point to its related code block instead.
+4. CodeBlocks should be deleted correctly
+5. SourceDoc Saving/Reconstruction through JSON

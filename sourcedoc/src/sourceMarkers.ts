@@ -3,11 +3,17 @@ import { formatTime, SourcePasteModel } from './sourcePasteModel';
 
 export type { SourcedPaste } from './sourcePasteModel';
 
-function buildHoverMessage(recordedAt: Date, source: string, reason: string): vscode.MarkdownString {
+function buildHoverMessage(recordedAt: Date, source: string, reason: string, range: vscode.Range): vscode.MarkdownString {
 	const payload = {
 		Source: source,
 		Time: formatTime(recordedAt),
 		Reason: reason || '(none)',
+		Bounds: {
+			startLine: range.start.line + 1,
+			startCharacter: range.start.character + 1,
+			endLine: range.end.line + 1,
+			endCharacter: range.end.character + 1,
+		},
 	};
 	const ms = new vscode.MarkdownString();
 	ms.appendCodeblock(JSON.stringify(payload, null, 2), 'json');
@@ -42,7 +48,7 @@ export class SourceMarkers implements vscode.Disposable {
 		const pastes = this.model.getPastes(editor.document.uri);
 		const options: vscode.DecorationOptions[] = pastes.map((p) => ({
 			range: p.range,
-			hoverMessage: buildHoverMessage(p.recordedAt, p.source, p.reason),
+			hoverMessage: buildHoverMessage(p.recordedAt, p.source, p.reason, p.range),
 		}));
 		editor.setDecorations(this.decorationType, options);
 	}

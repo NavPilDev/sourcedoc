@@ -6,6 +6,7 @@ import { SourceWebviewViewProvider } from './sourceWebviewViewProvider';
 export function activate(context: vscode.ExtensionContext): void {
 	const model = new SourcePasteModel();
 	context.subscriptions.push(model);
+	void model.loadPersistedData();
 
 	const markers = new SourceMarkers(model);
 	context.subscriptions.push(markers);

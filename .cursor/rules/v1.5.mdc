@@ -1,14 +1,43 @@
 ## Version 1.5 Implementation
 
-This version of SourceDoc should change the manual implementation of sourcing by adding options instead of an input text box. This is to make sourcing not tedious.
+### Goal
 
-When a copy paste happens The following should appear in the prompt with the choices following after:
-Where are you pasting this from?
-"Stack Overflow"
-"Github"
-"ChatGPT"
-"Claude Code"
-"IDE Agent(Cursor, Github Copilot)"
-"Other(Please Specify)" # This should allow for the user to manually input their source
+Make paste attribution faster by using source options, remove the paste-time reason prompt, and move reason entry to the webview.
 
-Take away the reason for using this source question. On the webview part of the SourceDoc, add functionality where the user can click on the documented code block, and the editor would move to the block. The webview should also allow for specification of a reason for a specific code block. 
+### Paste Attribution UX
+
+When a paste is detected, show a prompt in the editor:
+
+`Where are you pasting this from?`
+
+Use these source options:
+- `Stack Overflow`
+- `Github`
+- `ChatGPT`
+- `Claude Code`
+- `IDE Agent(Cursor, Github Copilot)`
+- `Other(Please Specify)`
+
+If `Other(Please Specify)` is selected, prompt for a custom source text value.
+
+### Reason Handling
+
+- Do not ask `reason` during the paste flow.
+- New paste records should be created with an empty reason value.
+- Reason should be editable later from the SourceDoc webview per code block.
+
+### Webview Behavior
+
+- Each documented code block should include an action to navigate to that block in the editor.
+- Clicking the navigation action should move focus to the corresponding range in the active file.
+- Each code block should include an action to set or update its reason.
+- Updated reason values should appear in both the webview and marker hover metadata.
+
+### Expected Result
+
+Version 1.5 should support:
+1. Quick source selection during paste.
+2. Optional custom source entry for `Other`.
+3. No reason prompt during paste.
+4. Click-to-jump from webview to code block.
+5. Per-block reason editing from webview.

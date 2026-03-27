@@ -6,8 +6,11 @@ import {
 } from './sourcePasteModel';
 
 export interface WebviewPasteRow {
+	id: string;
 	startLine: number;
 	endLine: number;
+	startCharacter: number;
+	endCharacter: number;
 	time: string;
 	source: string;
 	reason: string;
@@ -18,6 +21,10 @@ export interface WebviewUpdateMessage {
 	fileLabel: string;
 	pastes: WebviewPasteRow[];
 }
+
+type WebviewActionMessage =
+	| { type: 'goToBlock'; id: string }
+	| { type: 'setReason'; id: string };
 
 function fileLabelForUri(uri: vscode.Uri): string {
 	const folder = vscode.workspace.getWorkspaceFolder(uri);
@@ -32,8 +39,11 @@ function fileLabelForUri(uri: vscode.Uri): string {
 
 function serializePastes(uri: vscode.Uri, model: SourcePasteModel): WebviewPasteRow[] {
 	return model.getPastes(uri).map((p) => ({
+		id: p.id,
 		startLine: p.range.start.line + 1,
 		endLine: p.range.end.line + 1,
+		startCharacter: p.range.start.character + 1,
+		endCharacter: p.range.end.character + 1,
 		time: formatTime(p.recordedAt),
 		source: p.source,
 		reason: p.reason,
@@ -94,6 +104,22 @@ function buildHtml(nonce: string, cspSource: string): string {
 			-webkit-box-orient: vertical;
 			overflow: hidden;
 		}
+		.actions {
+			margin-top: 8px;
+			display: flex;
+			gap: 8px;
+		}
+		button {
+			background: var(--vscode-button-secondaryBackground, transparent);
+			color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+			border: 1px solid var(--vscode-widget-border, rgba(127,127,127,0.3));
+			border-radius: 4px;
+			padding: 3px 8px;
+			cursor: pointer;
+		}
+		button:hover {
+			background: var(--vscode-button-secondaryHoverBackground, rgba(127,127,127,0.2));
+		}
 	</style>
 </head>
 <body>
@@ -119,16 +145,32 @@ function buildHtml(nonce: string, cspSource: string): string {
 				const li = document.createElement('li');
 				const lines = document.createElement('div');
 				lines.className = 'lines';
-				lines.textContent = 'Lines ' + p.startLine + (p.endLine !== p.startLine ? '–' + p.endLine : '');
+				lines.textContent = 'Lines ' + p.startLine + (p.endLine !== p.startLine ? '–' + p.endLine : '') +
+					' · Cols ' + p.startCharacter + '–' + p.endCharacter;
 				const meta = document.createElement('div');
 				meta.className = 'meta';
 				meta.textContent = p.time + ' · Source: ' + p.source;
 				const reason = document.createElement('div');
 				reason.className = 'reason';
 				reason.textContent = 'Reason: ' + (p.reason || '(none)');
+				const actions = document.createElement('div');
+				actions.className = 'actions';
+				const goToButton = document.createElement('button');
+				goToButton.textContent = 'Go to block';
+				goToButton.addEventListener('click', function () {
+					vscode.postMessage({ type: 'goToBlock', id: p.id });
+				});
+				const setReasonButton = document.createElement('button');
+				setReasonButton.textContent = 'Set reason';
+				setReasonButton.addEventListener('click', function () {
+					vscode.postMessage({ type: 'setReason', id: p.id });
+				});
+				actions.appendChild(goToButton);
+				actions.appendChild(setReasonButton);
 				li.appendChild(lines);
 				li.appendChild(meta);
 				li.appendChild(reason);
+				li.appendChild(actions);
 				listEl.appendChild(li);
 			}
 		});
@@ -177,11 +219,53 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider {
 			webview.postMessage(msg);
 		};
 
+		const handleWebviewAction = async (raw: unknown): Promise<void> => {
+			const msg = raw as WebviewActionMessage;
+			if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') {
+				return;
+			}
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) {
+				return;
+			}
+			const uri = editor.document.uri;
+			if (typeof msg.id !== 'string' || msg.id.length === 0) {
+				return;
+			}
+			const paste = this.model.getPasteById(uri, msg.id);
+			if (!paste) {
+				return;
+			}
+
+			if (msg.type === 'goToBlock') {
+				const targetEditor = await vscode.window.showTextDocument(uri, { preview: false });
+				targetEditor.selection = new vscode.Selection(paste.range.start, paste.range.end);
+				targetEditor.revealRange(paste.range, vscode.TextEditorRevealType.InCenter);
+				return;
+			}
+
+			if (msg.type === 'setReason') {
+				const input = await vscode.window.showInputBox({
+					title: `SourceDoc - reason for lines ${paste.range.start.line + 1}-${paste.range.end.line + 1}`,
+					prompt: 'Enter a reason for this code block.',
+					value: paste.reason,
+					ignoreFocusOut: true,
+				});
+				if (input === undefined) {
+					return;
+				}
+				this.model.updateReasonById(uri, msg.id, input.trim());
+			}
+		};
+
 		postUpdate();
 
 		const subs: vscode.Disposable[] = [
 			this.model.onDidChange(() => postUpdate()),
 			vscode.window.onDidChangeActiveTextEditor(() => postUpdate()),
+			webview.onDidReceiveMessage((msg) => {
+				void handleWebviewAction(msg);
+			}),
 			webviewView.onDidChangeVisibility(() => {
 				if (webviewView.visible) {
 					postUpdate();
