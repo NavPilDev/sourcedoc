@@ -1,0 +1,14 @@
+## Version 1.5 Implementation
+
+This version of SourceDoc should change the manual implementation of sourcing by adding options instead of an input text box. This is to make sourcing not tedious.
+
+When a copy paste happens The following should appear in the prompt with the choices following after:
+Where are you pasting this from?
+"Stack Overflow"
+"Github"
+"ChatGPT"
+"Claude Code"
+"IDE Agent(Cursor, Github Copilot)"
+"Other(Please Specify)" # This should allow for the user to manually input their source
+
+Take away the reason for using this source question. On the webview part of the SourceDoc, add functionality where the user can click on the documented code block, and the editor would move to the block. The webview should also allow for specification of a reason for a specific code block. 

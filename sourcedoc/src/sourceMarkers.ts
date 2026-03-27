@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
-import { DUMMY_PROMPT_HISTORY, formatTime, SourcePasteModel, SOURCE_LABEL } from './sourcePasteModel';
+import { formatTime, SourcePasteModel } from './sourcePasteModel';
 
 export type { SourcedPaste } from './sourcePasteModel';
 
-function buildHoverMessage(recordedAt: Date): vscode.MarkdownString {
+function buildHoverMessage(recordedAt: Date, source: string, reason: string): vscode.MarkdownString {
 	const payload = {
-		Source: SOURCE_LABEL,
+		Source: source,
 		Time: formatTime(recordedAt),
-		'Prompt History': DUMMY_PROMPT_HISTORY,
+		Reason: reason || '(none)',
 	};
 	const ms = new vscode.MarkdownString();
 	ms.appendCodeblock(JSON.stringify(payload, null, 2), 'json');
@@ -42,7 +42,7 @@ export class SourceMarkers implements vscode.Disposable {
 		const pastes = this.model.getPastes(editor.document.uri);
 		const options: vscode.DecorationOptions[] = pastes.map((p) => ({
 			range: p.range,
-			hoverMessage: buildHoverMessage(p.recordedAt),
+			hoverMessage: buildHoverMessage(p.recordedAt, p.source, p.reason),
 		}));
 		editor.setDecorations(this.decorationType, options);
 	}

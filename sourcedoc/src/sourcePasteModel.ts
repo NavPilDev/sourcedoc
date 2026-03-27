@@ -3,12 +3,9 @@ import * as vscode from 'vscode';
 export interface SourcedPaste {
 	range: vscode.Range;
 	recordedAt: Date;
+	source: string;
+	reason: string;
 }
-
-export const SOURCE_LABEL = 'Human Copy-Paste (Stack Overflow)';
-
-export const DUMMY_PROMPT_HISTORY =
-	'Prior session prompts would appear here for attribution and research workflows.';
 
 const MIN_PASTE_CHARS = 25;
 const MIN_MULTILINE_CHARS = 3;
@@ -48,9 +45,18 @@ function shouldTrackDocument(document: vscode.TextDocument): boolean {
 	return document.uri.scheme === 'file' || document.uri.scheme === 'untitled';
 }
 
+interface PendingPaste {
+	uri: vscode.Uri;
+	lineRange: vscode.Range;
+	recordedAt: Date;
+	fileLabel: string;
+}
+
 export class SourcePasteModel implements vscode.Disposable {
 	private readonly pastesByUri = new Map<string, SourcedPaste[]>();
 	private readonly _onDidChange = new vscode.EventEmitter<vscode.Uri>();
+	private readonly pendingPastes: PendingPaste[] = [];
+	private isPrompting = false;
 	readonly onDidChange = this._onDidChange.event;
 
 	dispose(): void {
@@ -66,27 +72,72 @@ export class SourcePasteModel implements vscode.Disposable {
 		if (!shouldTrackDocument(document)) {
 			return;
 		}
-		const key = document.uri.toString();
-		let list = this.pastesByUri.get(key);
-		if (!list) {
-			list = [];
-			this.pastesByUri.set(key, list);
-		}
-
 		const recordedAt = new Date();
-		let added = false;
+		let enqueued = false;
 		for (const change of event.contentChanges) {
 			if (!looksLikePaste(change.text)) {
 				continue;
 			}
 			const inserted = insertedRangeForChange(document, change);
 			const lineRange = toWholeLineRange(document, inserted);
-			list.push({ range: lineRange, recordedAt });
-			added = true;
+			this.pendingPastes.push({
+				uri: document.uri,
+				lineRange,
+				recordedAt,
+				fileLabel: vscode.workspace.asRelativePath(document.uri, false),
+			});
+			enqueued = true;
 		}
 
-		if (added) {
-			this._onDidChange.fire(document.uri);
+		if (enqueued) {
+			void this.processPendingPastes();
+		}
+	}
+
+	private async processPendingPastes(): Promise<void> {
+		if (this.isPrompting) {
+			return;
+		}
+		this.isPrompting = true;
+		try {
+			while (this.pendingPastes.length > 0) {
+				const nextPaste = this.pendingPastes.shift();
+				if (!nextPaste) {
+					continue;
+				}
+
+				const source = await vscode.window.showInputBox({
+					title: `SourceDoc - paste attribution (${nextPaste.fileLabel || 'Untitled'})`,
+					prompt: 'Enter the source for this pasted code (URL or description).',
+					ignoreFocusOut: true,
+				});
+				if (source === undefined) {
+					continue;
+				}
+
+				const reasonInput = await vscode.window.showInputBox({
+					title: `SourceDoc - paste reason (${nextPaste.fileLabel || 'Untitled'})`,
+					prompt: 'Why was this code pasted?',
+					ignoreFocusOut: true,
+				});
+				const reason = reasonInput ?? '';
+
+				const key = nextPaste.uri.toString();
+				let list = this.pastesByUri.get(key);
+				if (!list) {
+					list = [];
+					this.pastesByUri.set(key, list);
+				}
+				list.push({
+					range: nextPaste.lineRange,
+					recordedAt: nextPaste.recordedAt,
+					source,
+					reason,
+				});
+				this._onDidChange.fire(nextPaste.uri);
+			}
+		} finally {
+			this.isPrompting = false;
 		}
 	}
 }

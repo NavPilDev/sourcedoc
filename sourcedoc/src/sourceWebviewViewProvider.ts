@@ -1,9 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
-	DUMMY_PROMPT_HISTORY,
 	formatTime,
-	SOURCE_LABEL,
 	SourcePasteModel,
 } from './sourcePasteModel';
 
@@ -12,7 +10,7 @@ export interface WebviewPasteRow {
 	endLine: number;
 	time: string;
 	source: string;
-	promptHistory: string;
+	reason: string;
 }
 
 export interface WebviewUpdateMessage {
@@ -37,8 +35,8 @@ function serializePastes(uri: vscode.Uri, model: SourcePasteModel): WebviewPaste
 		startLine: p.range.start.line + 1,
 		endLine: p.range.end.line + 1,
 		time: formatTime(p.recordedAt),
-		source: SOURCE_LABEL,
-		promptHistory: DUMMY_PROMPT_HISTORY,
+		source: p.source,
+		reason: p.reason,
 	}));
 }
 
@@ -87,7 +85,7 @@ function buildHtml(nonce: string, cspSource: string): string {
 		.lines {
 			font-variant-numeric: tabular-nums;
 		}
-		.prompt {
+		.reason {
 			margin-top: 6px;
 			font-size: 0.88em;
 			opacity: 0.85;
@@ -124,13 +122,13 @@ function buildHtml(nonce: string, cspSource: string): string {
 				lines.textContent = 'Lines ' + p.startLine + (p.endLine !== p.startLine ? '–' + p.endLine : '');
 				const meta = document.createElement('div');
 				meta.className = 'meta';
-				meta.textContent = p.time + ' · ' + p.source;
-				const pr = document.createElement('div');
-				pr.className = 'prompt';
-				pr.textContent = p.promptHistory;
+				meta.textContent = p.time + ' · Source: ' + p.source;
+				const reason = document.createElement('div');
+				reason.className = 'reason';
+				reason.textContent = 'Reason: ' + (p.reason || '(none)');
 				li.appendChild(lines);
 				li.appendChild(meta);
-				li.appendChild(pr);
+				li.appendChild(reason);
 				listEl.appendChild(li);
 			}
 		});

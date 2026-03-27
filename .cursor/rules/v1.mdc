@@ -3,12 +3,20 @@
 The first version of SourceDoc needs to have the following:
 - Provide Sourcing of lines of code within a file
   - The extension should automatically listen for copy paste events from the user
+  - For detected paste inserts, prompt the user in-editor (VS Code Quick Input) for:
+    1) source (URL or free-text attribution)
+    2) reason for pasting
+  - Prompt handling should be serialized so multiple pastes do not open overlapping input flows
+  - If the first prompt is canceled, do not record the paste entry
+  - If the second prompt is canceled, still record the paste with an empty reason
   - This should visually be represented with TextEditorDecorationService to visually highlight code line(s) with markers
   - When the user hovers over the markers, a window should pop up showing:
   ```
   {
-    Source: Human Copy-Paste (Stack Overflow)
+    Source: <user-entered source>
     Time: XX:XX
-    Prompt History: (add some dummy text here)
+    Reason: <user-entered reason or empty>
   }
   ```
+  - The SourceDoc webview panel should show each paste entry only after attribution input is collected
+  - The webview row should include lines, time, source, and reason
