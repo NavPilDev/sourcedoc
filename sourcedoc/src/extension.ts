@@ -11,7 +11,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const markers = new SourceMarkers(model);
 	context.subscriptions.push(markers);
 
-	context.subscriptions.push(
+	context.subscriptions.push(	
 		vscode.window.registerWebviewViewProvider(
 			'sourcedoc.sourcePanel',
 			new SourceWebviewViewProvider(context.extensionUri, model),

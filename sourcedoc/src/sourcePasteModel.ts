@@ -125,6 +125,43 @@ export class SourcePasteModel implements vscode.Disposable {
 		return true;
 	}
 
+	deletePasteById(uri: vscode.Uri, id: string): boolean {
+		const key = uri.toString();
+		const list = this.pastesByUri.get(key);
+		if (!list) {
+			return false;
+		}
+		const next = deletePasteByIdFromList(list, id);
+		if (next.length === list.length) {
+			return false;
+		}
+		if (next.length === 0) {
+			this.pastesByUri.delete(key);
+		} else {
+			this.pastesByUri.set(key, next);
+		}
+		this._onDidChange.fire(uri);
+		this.schedulePersistForUri(uri);
+		return true;
+	}
+
+	clearPastesForUri(uri: vscode.Uri): boolean {
+		const key = uri.toString();
+		const list = this.pastesByUri.get(key);
+		if (!list) {
+			return false;
+		}
+		const next = clearPastesFromList(list);
+		if (next.length === 0) {
+			this.pastesByUri.delete(key);
+		} else {
+			this.pastesByUri.set(key, next);
+		}
+		this._onDidChange.fire(uri);
+		this.schedulePersistForUri(uri);
+		return true;
+	}
+
 	async loadPersistedData(): Promise<void> {
 		const folders = vscode.workspace.workspaceFolders ?? [];
 		for (const folder of folders) {
@@ -459,4 +496,15 @@ export const __test = {
 	transformRange,
 	rangesOverlap,
 	isLikelyTypingLikeEdit,
+	createPasteId,
+	deletePasteByIdFromList,
+	clearPastesFromList,
 };
+
+function deletePasteByIdFromList(list: readonly SourcedPaste[], id: string): SourcedPaste[] {
+	return list.filter((item) => item.id !== id);
+}
+
+function clearPastesFromList(_list?: readonly SourcedPaste[]): SourcedPaste[] {
+	return [];
+}

@@ -35,93 +35,49 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SourceMarkers = void 0;
 const vscode = __importStar(require("vscode"));
-const DUMMY_PROMPT_HISTORY = 'Prior session prompts would appear here for attribution and research workflows.';
-const MIN_PASTE_CHARS = 25;
-const MIN_MULTILINE_CHARS = 3;
-function looksLikePaste(text) {
-    if (!text) {
-        return false;
-    }
-    if (text.length >= MIN_PASTE_CHARS) {
-        return true;
-    }
-    return text.includes('\n') && text.length >= MIN_MULTILINE_CHARS;
-}
-function formatTime(d) {
-    const h = d.getHours().toString().padStart(2, '0');
-    const m = d.getMinutes().toString().padStart(2, '0');
-    return `${h}:${m}`;
-}
-function buildHoverMessage(recordedAt) {
+const sourcePasteModel_1 = require("./sourcePasteModel");
+function buildHoverMessage(recordedAt, source, reason, range) {
     const payload = {
-        Source: 'Human Copy-Paste (Stack Overflow)',
-        Time: formatTime(recordedAt),
-        'Prompt History': DUMMY_PROMPT_HISTORY,
+        Source: source,
+        Time: (0, sourcePasteModel_1.formatTime)(recordedAt),
+        Reason: reason || '(none)',
+        Bounds: {
+            startLine: range.start.line + 1,
+            startCharacter: range.start.character + 1,
+            endLine: range.end.line + 1,
+            endCharacter: range.end.character + 1,
+        },
     };
     const ms = new vscode.MarkdownString();
     ms.appendCodeblock(JSON.stringify(payload, null, 2), 'json');
     ms.isTrusted = true;
     return ms;
 }
-function insertedRangeForChange(document, change) {
-    const start = document.positionAt(change.rangeOffset);
-    const end = document.positionAt(change.rangeOffset + change.text.length);
-    return new vscode.Range(start, end);
-}
-function toWholeLineRange(document, range) {
-    const startLine = range.start.line;
-    const endLine = range.end.line;
-    return new vscode.Range(new vscode.Position(startLine, 0), document.lineAt(endLine).range.end);
-}
-function shouldTrackDocument(document) {
-    return document.uri.scheme === 'file' || document.uri.scheme === 'untitled';
-}
 class SourceMarkers {
     decorationType;
-    pastesByUri = new Map();
-    constructor() {
+    model;
+    modelListener;
+    constructor(model) {
+        this.model = model;
         this.decorationType = vscode.window.createTextEditorDecorationType({
             isWholeLine: true,
             backgroundColor: 'rgba(80, 200, 255, 0.12)',
             overviewRulerColor: 'rgba(80, 200, 255, 0.45)',
             overviewRulerLane: vscode.OverviewRulerLane.Left,
         });
+        this.modelListener = model.onDidChange((uri) => {
+            this.refreshEditorsForDocument(uri);
+        });
     }
     dispose() {
+        this.modelListener.dispose();
         this.decorationType.dispose();
     }
-    handleDocumentChange(event) {
-        const { document } = event;
-        if (!shouldTrackDocument(document)) {
-            return;
-        }
-        const key = document.uri.toString();
-        let list = this.pastesByUri.get(key);
-        if (!list) {
-            list = [];
-            this.pastesByUri.set(key, list);
-        }
-        const recordedAt = new Date();
-        let added = false;
-        for (const change of event.contentChanges) {
-            if (!looksLikePaste(change.text)) {
-                continue;
-            }
-            const inserted = insertedRangeForChange(document, change);
-            const lineRange = toWholeLineRange(document, inserted);
-            list.push({ range: lineRange, recordedAt });
-            added = true;
-        }
-        if (added) {
-            this.refreshEditorsForDocument(document.uri);
-        }
-    }
     refreshEditor(editor) {
-        const key = editor.document.uri.toString();
-        const pastes = this.pastesByUri.get(key);
-        const options = (pastes ?? []).map((p) => ({
+        const pastes = this.model.getPastes(editor.document.uri);
+        const options = pastes.map((p) => ({
             range: p.range,
-            hoverMessage: buildHoverMessage(p.recordedAt),
+            hoverMessage: buildHoverMessage(p.recordedAt, p.source, p.reason, p.range),
         }));
         editor.setDecorations(this.decorationType, options);
     }

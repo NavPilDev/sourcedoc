@@ -36,12 +36,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
+const sourcePasteModel_1 = require("./sourcePasteModel");
 const sourceMarkers_1 = require("./sourceMarkers");
+const sourceWebviewViewProvider_1 = require("./sourceWebviewViewProvider");
 function activate(context) {
-    const markers = new sourceMarkers_1.SourceMarkers();
-    context.subscriptions.push({ dispose: () => markers.dispose() });
+    const model = new sourcePasteModel_1.SourcePasteModel();
+    context.subscriptions.push(model);
+    void model.loadPersistedData();
+    const markers = new sourceMarkers_1.SourceMarkers(model);
+    context.subscriptions.push(markers);
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider('sourcedoc.sourcePanel', new sourceWebviewViewProvider_1.SourceWebviewViewProvider(context.extensionUri, model), { webviewOptions: { retainContextWhenHidden: true } }));
     context.subscriptions.push(vscode.workspace.onDidChangeTextDocument((e) => {
-        markers.handleDocumentChange(e);
+        model.handleDocumentChange(e);
     }));
     context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor((editor) => {
         if (editor) {

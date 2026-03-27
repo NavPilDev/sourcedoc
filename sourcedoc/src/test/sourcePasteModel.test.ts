@@ -49,4 +49,42 @@ suite('SourcePasteModel range transform', () => {
 		assert.strictEqual(__test.isLikelyTypingLikeEdit(typingEdit), true);
 		assert.strictEqual(__test.isLikelyTypingLikeEdit(multiLinePaste), false);
 	});
+
+	test('delete by id removes only target block', () => {
+		const a = {
+			id: 'a',
+			range: new vscode.Range(new vscode.Position(1, 0), new vscode.Position(2, 0)),
+			recordedAt: new Date(),
+			source: 'Stack Overflow',
+			reason: '',
+		};
+		const b = {
+			id: 'b',
+			range: new vscode.Range(new vscode.Position(3, 0), new vscode.Position(4, 0)),
+			recordedAt: new Date(),
+			source: 'Github',
+			reason: '',
+		};
+		const next = __test.deletePasteByIdFromList([a, b], 'a');
+		assert.strictEqual(next.length, 1);
+		assert.strictEqual(next[0]?.id, 'b');
+	});
+
+	test('delete by unknown id is no-op', () => {
+		const a = {
+			id: 'a',
+			range: new vscode.Range(new vscode.Position(1, 0), new vscode.Position(2, 0)),
+			recordedAt: new Date(),
+			source: 'Stack Overflow',
+			reason: '',
+		};
+		const next = __test.deletePasteByIdFromList([a], 'missing');
+		assert.strictEqual(next.length, 1);
+		assert.strictEqual(next[0]?.id, 'a');
+	});
+
+	test('clear all returns empty list', () => {
+		const cleared = __test.clearPastesFromList();
+		assert.strictEqual(cleared.length, 0);
+	});
 });

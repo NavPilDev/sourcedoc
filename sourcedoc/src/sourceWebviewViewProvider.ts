@@ -24,7 +24,9 @@ export interface WebviewUpdateMessage {
 
 type WebviewActionMessage =
 	| { type: 'goToBlock'; id: string }
-	| { type: 'setReason'; id: string };
+	| { type: 'setReason'; id: string }
+	| { type: 'deleteBlock'; id: string }
+	| { type: 'clearAll' };
 
 function fileLabelForUri(uri: vscode.Uri): string {
 	const folder = vscode.workspace.getWorkspaceFolder(uri);
@@ -75,12 +77,18 @@ function buildHtml(nonce: string, cspSource: string): string {
 			margin-bottom: 10px;
 			word-break: break-all;
 		}
+		.toolbar {
+			display: flex;
+			justify-content: flex-end;
+			margin-bottom: 10px;
+		}
 		ul {
 			list-style: none;
 			padding: 0;
 			margin: 0;
 		}
 		li {
+			position: relative;
 			border: 1px solid var(--vscode-widget-border, rgba(127,127,127,0.3));
 			border-radius: 4px;
 			padding: 8px 10px;
@@ -109,6 +117,14 @@ function buildHtml(nonce: string, cspSource: string): string {
 			display: flex;
 			gap: 8px;
 		}
+		.icon-button {
+			position: absolute;
+			top: 8px;
+			right: 8px;
+			padding: 2px 6px;
+			min-width: 0;
+			line-height: 1;
+		}
 		button {
 			background: var(--vscode-button-secondaryBackground, transparent);
 			color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
@@ -124,6 +140,9 @@ function buildHtml(nonce: string, cspSource: string): string {
 </head>
 <body>
 	<div class="file" id="file"></div>
+	<div class="toolbar">
+		<button id="clearAllButton">Clear All</button>
+	</div>
 	<div class="hint" id="hint">Paste code in the editor to record line sourcing for this file.</div>
 	<ul id="list"></ul>
 	<script nonce="${nonce}">
@@ -131,6 +150,10 @@ function buildHtml(nonce: string, cspSource: string): string {
 		const fileEl = document.getElementById('file');
 		const hintEl = document.getElementById('hint');
 		const listEl = document.getElementById('list');
+		const clearAllButton = document.getElementById('clearAllButton');
+		clearAllButton.addEventListener('click', function () {
+			vscode.postMessage({ type: 'clearAll' });
+		});
 		window.addEventListener('message', function (event) {
 			const msg = event.data;
 			if (!msg || msg.type !== 'update') { return; }
@@ -153,6 +176,13 @@ function buildHtml(nonce: string, cspSource: string): string {
 				const reason = document.createElement('div');
 				reason.className = 'reason';
 				reason.textContent = 'Reason: ' + (p.reason || '(none)');
+				const deleteButton = document.createElement('button');
+				deleteButton.className = 'icon-button';
+				deleteButton.title = 'Delete this SourceDoc code block';
+				deleteButton.textContent = '🗑';
+				deleteButton.addEventListener('click', function () {
+					vscode.postMessage({ type: 'deleteBlock', id: p.id });
+				});
 				const actions = document.createElement('div');
 				actions.className = 'actions';
 				const goToButton = document.createElement('button');
@@ -170,6 +200,7 @@ function buildHtml(nonce: string, cspSource: string): string {
 				li.appendChild(lines);
 				li.appendChild(meta);
 				li.appendChild(reason);
+				li.appendChild(deleteButton);
 				li.appendChild(actions);
 				listEl.appendChild(li);
 			}
@@ -229,15 +260,26 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 			const uri = editor.document.uri;
+			if (msg.type === 'clearAll') {
+				const confirm = 'Clear all';
+				const choice = await vscode.window.showWarningMessage(
+					'Clear all SourceDoc code block metadata for this file?',
+					{ modal: true },
+					confirm
+				);
+				if (choice === confirm) {
+					this.model.clearPastesForUri(uri);
+				}
+				return;
+			}
 			if (typeof msg.id !== 'string' || msg.id.length === 0) {
 				return;
 			}
-			const paste = this.model.getPasteById(uri, msg.id);
-			if (!paste) {
-				return;
-			}
-
 			if (msg.type === 'goToBlock') {
+				const paste = this.model.getPasteById(uri, msg.id);
+				if (!paste) {
+					return;
+				}
 				const targetEditor = await vscode.window.showTextDocument(uri, { preview: false });
 				targetEditor.selection = new vscode.Selection(paste.range.start, paste.range.end);
 				targetEditor.revealRange(paste.range, vscode.TextEditorRevealType.InCenter);
@@ -245,6 +287,10 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider {
 			}
 
 			if (msg.type === 'setReason') {
+				const paste = this.model.getPasteById(uri, msg.id);
+				if (!paste) {
+					return;
+				}
 				const input = await vscode.window.showInputBox({
 					title: `SourceDoc - reason for lines ${paste.range.start.line + 1}-${paste.range.end.line + 1}`,
 					prompt: 'Enter a reason for this code block.',
@@ -255,6 +301,11 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider {
 					return;
 				}
 				this.model.updateReasonById(uri, msg.id, input.trim());
+				return;
+			}
+
+			if (msg.type === 'deleteBlock') {
+				this.model.deletePasteById(uri, msg.id);
 			}
 		};
 

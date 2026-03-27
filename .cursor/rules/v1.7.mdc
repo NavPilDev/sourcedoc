@@ -1,0 +1,15 @@
+## Version 1.6 Implementation
+
+### Goal
+
+Add a delete and clear all button to webview of SourceDoc. 
+
+### Delete Button
+This should show up for each codeblock within the webview
+- Trash Icon in the top right of each code block
+- Deletes SourceDoc Codeblock from save JSON, and file. 
+
+### Clear All Button
+This should show up at the top of the webview which allows of clearing all of the codeblocks associated with the viewed file
+- ClearAll button at the top of the webview
+- Confirmation to delete all codeblock documentation/markers
