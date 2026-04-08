@@ -1,71 +1,41 @@
-# sourcedoc README
+# SourceDoc | Realtime Source Documentation + AI Footprints
 
-This is the README for your extension "sourcedoc". After writing up a brief description, we recommend including the following sections.
 
-## Features
+This project is a VSCode/cursor extension paired with a living program that will track copy/paste information and relay source information within an IDE. This project also tracks users' AI footprints 
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
 
-For example if there is an image subfolder under your extension project workspace:
+## Setup
+Here are the setup instructions for the environment.
+```
+cd SourceDoc
+npm install
+npm run compile
+```
+This will install all necessary packages and create a /dist folder in the project root that contains the files VS Code needs to run the program.
 
-\!\[feature X\]\(images/feature-x.png\)
+## Running the Program
+Before you run the program, make sure to run:
+```
+npm run watch
+```
+This will automatically update the /dist build folder with the changes, keeping the debug environment up to date.
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+1. Open `/src/extension.ts`
+2. Press `F5`
+3. In the Select Environment Prompt, select `VS Code Extension Development (preview)`
+  - This will open up a new VS Code window with the extension installed
+  - Use the debug console to view debug logs and errors within this window
+4. Open up a new file/folder, and start coding.
+5. Copy and paste to see the changes reflected in the source doc interface(shown below).
+<img width="1206" height="561" alt="image" src="https://github.com/user-attachments/assets/237cc540-5890-42a2-bf9e-532729dc87be" />
 
-## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+## SourceDoc Version History
+### V1: Extension - Webview Implementation
+This version contains a proof of concept for user-pasted code. It includes a webview panel for SourceDoc that shows each documented portion of code, along with additional information about human-pasted code.
+<img width="787" height="579" alt="image" src="https://github.com/user-attachments/assets/5885733b-bc70-4400-8318-ed65e562e4e2" />
 
-## Extension Settings
+### V2: Extension - IDE-Based AI Footprints 
+This version aims to include the IDE-based agentic sourcing for AI-generated/assisted code. This version plans to incorporate functionality to properly source both GitHub Copilot and Cursor Agent within a file's history. This version will also include a persistent SourceDoc file history, so that sourcing can be reconstructed and saved each time the user accesses their codebase
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
 
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**

@@ -3,6 +3,15 @@ import { SourcePasteModel } from './sourcePasteModel';
 import { SourceMarkers } from './sourceMarkers';
 import { SourceWebviewViewProvider } from './sourceWebviewViewProvider';
 import { openAiAnnotationModal } from './ui/aiAnnotationModal';
+import * as fs from 'node:fs';
+
+// #region agent log (cursor dev host load check)
+(() => {
+	const payload = { sessionId: '2fd7de', runId: 'pre-fix', hypothesisId: 'H1', location: 'sourcedoc/src/extension.ts:MODULE', message: 'SourceDoc module loaded', data: {}, timestamp: Date.now() };
+	fetch('http://127.0.0.1:7486/ingest/4fdf7a79-8eb6-4ce6-bf36-b69be0451e26', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '2fd7de' }, body: JSON.stringify(payload) }).catch(() => {});
+	try { fs.appendFileSync('/Users/abhinavpillai/Coding Projects/sourcedoc-1/.cursor/debug-2fd7de.log', JSON.stringify(payload) + '\n'); } catch {}
+})();
+// #endregion agent log
 
 function overlaps(a: vscode.Range, b: vscode.Range): boolean {
 	return a.intersection(b) !== undefined;
@@ -16,6 +25,14 @@ function describePaste(p: { range: vscode.Range; source: string }): string {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+	// #region agent log (cursor dev host activation check)
+	(() => {
+		const payload = { sessionId: '2fd7de', runId: 'pre-fix', hypothesisId: 'H2', location: 'sourcedoc/src/extension.ts:activate', message: 'SourceDoc activate() entered', data: { extensionUri: String(context.extensionUri) }, timestamp: Date.now() };
+		fetch('http://127.0.0.1:7486/ingest/4fdf7a79-8eb6-4ce6-bf36-b69be0451e26', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '2fd7de' }, body: JSON.stringify(payload) }).catch(() => {});
+		try { fs.appendFileSync('/Users/abhinavpillai/Coding Projects/sourcedoc-1/.cursor/debug-2fd7de.log', JSON.stringify(payload) + '\n'); } catch {}
+	})();
+	// #endregion agent log
+
 	const model = new SourcePasteModel();
 	context.subscriptions.push(model);
 	void model.loadPersistedData();
