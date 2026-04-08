@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { openAiAnnotationModal, type AiMetadata } from './ui/aiAnnotationModal';
 
 export interface SourcedPaste {
 	id: string;
@@ -6,6 +7,7 @@ export interface SourcedPaste {
 	recordedAt: Date;
 	source: string;
 	reason: string;
+	ai?: AiMetadata;
 }
 
 const MIN_PASTE_CHARS = 25;
@@ -60,12 +62,13 @@ interface PersistedSourcedPaste {
 	recordedAt: string;
 	source: string;
 	reason: string;
+	ai?: AiMetadata;
 	start: { line: number; character: number };
 	end: { line: number; character: number };
 }
 
 interface PersistedWorkspaceData {
-	version: 1;
+	version: 1 | 2;
 	files: Record<string, PersistedSourcedPaste[]>;
 }
 
@@ -77,6 +80,16 @@ const SOURCE_OPTIONS = [
 	'IDE Agent(Cursor, Github Copilot)',
 	'Other(Please Specify)',
 ] as const;
+
+function isAiSource(source: string): boolean {
+	const s = source.toLowerCase();
+	return (
+		s.includes('chatgpt') ||
+		s.includes('claude') ||
+		s.includes('copilot') ||
+		s.includes('ide agent')
+	);
+}
 
 export class SourcePasteModel implements vscode.Disposable {
 	private readonly pastesByUri = new Map<string, SourcedPaste[]>();
@@ -120,6 +133,47 @@ export class SourcePasteModel implements vscode.Disposable {
 		}
 		const existing = list[idx];
 		list[idx] = { ...existing, reason };
+		this._onDidChange.fire(uri);
+		this.schedulePersistForUri(uri);
+		return true;
+	}
+
+	updateAiMetadataById(uri: vscode.Uri, id: string, ai: AiMetadata | undefined): boolean {
+		const list = this.pastesByUri.get(uri.toString());
+		if (!list) {
+			return false;
+		}
+		const idx = list.findIndex((item) => item.id === id);
+		if (idx < 0) {
+			return false;
+		}
+		const existing = list[idx];
+		list[idx] = { ...existing, ai };
+		this._onDidChange.fire(uri);
+		this.schedulePersistForUri(uri);
+		return true;
+	}
+
+	clearAiMetadataById(uri: vscode.Uri, id: string): boolean {
+		return this.updateAiMetadataById(uri, id, undefined);
+	}
+
+	clearAiMetadataForUri(uri: vscode.Uri): boolean {
+		const key = uri.toString();
+		const list = this.pastesByUri.get(key);
+		if (!list || list.length === 0) {
+			return false;
+		}
+		let changed = false;
+		for (const item of list) {
+			if (item.ai) {
+				item.ai = undefined;
+				changed = true;
+			}
+		}
+		if (!changed) {
+			return false;
+		}
 		this._onDidChange.fire(uri);
 		this.schedulePersistForUri(uri);
 		return true;
@@ -178,6 +232,9 @@ export class SourcePasteModel implements vscode.Disposable {
 			} catch {
 				continue;
 			}
+			if (parsed.version !== 1 && parsed.version !== 2) {
+				continue;
+			}
 			const files = parsed.files ?? {};
 			for (const [relativePath, entries] of Object.entries(files)) {
 				const fileUri = vscode.Uri.joinPath(folder.uri, relativePath);
@@ -190,6 +247,7 @@ export class SourcePasteModel implements vscode.Disposable {
 					recordedAt: new Date(entry.recordedAt),
 					source: entry.source,
 					reason: entry.reason,
+					ai: entry.ai,
 				}));
 				if (hydrated.length > 0) {
 					this.pastesByUri.set(fileUri.toString(), hydrated);
@@ -265,8 +323,9 @@ export class SourcePasteModel implements vscode.Disposable {
 					list = [];
 					this.pastesByUri.set(key, list);
 				}
+				const pasteId = createPasteId();
 				list.push({
-					id: createPasteId(),
+					id: pasteId,
 					range: nextPaste.lineRange,
 					recordedAt: nextPaste.recordedAt,
 					source,
@@ -274,6 +333,14 @@ export class SourcePasteModel implements vscode.Disposable {
 				});
 				this._onDidChange.fire(nextPaste.uri);
 				this.schedulePersistForUri(nextPaste.uri);
+
+				if (isAiSource(source)) {
+					const existing = undefined;
+					const ai = await openAiAnnotationModal(existing);
+					if (ai) {
+						this.updateAiMetadataById(nextPaste.uri, pasteId, ai);
+					}
+				}
 			}
 		} finally {
 			this.isPrompting = false;
@@ -411,7 +478,7 @@ export class SourcePasteModel implements vscode.Disposable {
 		}
 
 		const payload: PersistedWorkspaceData = {
-			version: 1,
+			version: 2,
 			files,
 		};
 		const targetDir = vscode.Uri.joinPath(folder.uri, '.sourcedoc');
