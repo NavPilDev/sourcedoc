@@ -21,6 +21,8 @@ interface WebviewRecordRow {
 	preview: string;
 	hasPrompt: boolean;
 	hasNotes: boolean;
+	prompt?: string;
+	notes?: string;
 }
 
 interface WebviewUpdateMessage {
@@ -75,6 +77,8 @@ function serializeRecords(items: readonly AIAnnotation[]): WebviewRecordRow[] {
 		preview: item.textPreview,
 		hasPrompt: !!item.source.prompt,
 		hasNotes: !!item.source.notes,
+		prompt: item.source.prompt || '',
+		notes: item.source.notes || '',
 	}));
 }
 
@@ -197,15 +201,41 @@ function buildHtml(nonce: string, cspSource: string): string {
 		.model-tool-github { color: rgba(210, 210, 220, 0.78); }
 		.model-tool-geeksforgeeks { color: rgba(150, 235, 170, 0.78); }
 		.model-tool-other { color: rgba(160, 160, 170, 0.78); }
-		.preview {
-			font-size: 0.88em;
-			opacity: 0.82;
-			line-height: 1.4;
-			display: -webkit-box;
-			-webkit-line-clamp: 3;
-			-webkit-box-orient: vertical;
-			overflow: hidden;
+		.codeblock {
+			margin: 6px 0 8px;
+			padding: 10px 10px;
+			border-radius: 10px;
+			border: 1px solid rgba(127,127,127,0.25);
+			background: #2d2a2e; /* Monokai Pro classic-ish */
+			overflow: auto;
+			max-height: 180px;
+		}
+		.codeblock code {
+			display: block;
+			white-space: pre;
+			font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+			font-size: 0.86em;
+			line-height: 1.45;
+			color: #fcfcfa; /* warm off-white */
+		}
+		.section {
+			margin-top: 8px;
+		}
+		.section-label {
+			font-size: 0.78em;
+			letter-spacing: 0.04em;
+			text-transform: uppercase;
+			opacity: 0.8;
+			margin-bottom: 4px;
+		}
+		.section-body {
+			font-size: 0.86em;
+			line-height: 1.45;
+			opacity: 0.92;
+			white-space: pre-wrap;
 			word-break: break-word;
+			border-left: 2px solid rgba(127,127,127,0.35);
+			padding-left: 8px;
 		}
 		.flags {
 			display: flex;
@@ -357,13 +387,43 @@ function buildHtml(nonce: string, cspSource: string): string {
 			meta.appendChild(document.createTextNode(' • '));
 			meta.appendChild(modelSpan);
 
-			const preview = document.createElement('div');
-			preview.className = 'preview';
-			preview.textContent = record.preview || '(No preview available)';
+			const codePre = document.createElement('pre');
+			codePre.className = 'codeblock';
+			const codeEl = document.createElement('code');
+			codeEl.textContent = record.preview || '(No preview available)';
+			codePre.appendChild(codeEl);
 
 			li.appendChild(lines);
 			li.appendChild(meta);
-			li.appendChild(preview);
+			li.appendChild(codePre);
+
+			if (record.hasPrompt && record.prompt) {
+				const section = document.createElement('div');
+				section.className = 'section';
+				const label = document.createElement('div');
+				label.className = 'section-label';
+				label.textContent = 'Prompt';
+				const body = document.createElement('div');
+				body.className = 'section-body';
+				body.textContent = record.prompt;
+				section.appendChild(label);
+				section.appendChild(body);
+				li.appendChild(section);
+			}
+
+			if (record.hasNotes && record.notes) {
+				const section = document.createElement('div');
+				section.className = 'section';
+				const label = document.createElement('div');
+				label.className = 'section-label';
+				label.textContent = 'Notes';
+				const body = document.createElement('div');
+				body.className = 'section-body';
+				body.textContent = record.notes;
+				section.appendChild(label);
+				section.appendChild(body);
+				li.appendChild(section);
+			}
 
 			const flags = document.createElement('div');
 			flags.className = 'flags';
