@@ -86,9 +86,32 @@ function getModalHtml(
 			color: #ddd;
 		}
 
-		h2 {
+		.header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
 			margin-bottom: 12px;
+		}
+
+		h2 {
+			margin: 0;
 			font-size: 18px;
+		}
+
+		.icon-btn {
+			border: 1px solid #444;
+			background: transparent;
+			color: #ddd;
+			border-radius: 8px;
+			width: 32px;
+			height: 32px;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			cursor: pointer;
+			font-size: 18px;
+			line-height: 1;
 		}
 
 		label {
@@ -148,6 +171,16 @@ function getModalHtml(
 			padding: 4px 8px;
 		}
 
+		.quick-btn {
+			border: 1px solid #444;
+		}
+
+		.quick-btn.selected {
+			background: #007acc;
+			color: white;
+			border-color: #007acc;
+		}
+
 		.selection-box {
 			padding: 8px;
 			border-radius: 6px;
@@ -158,22 +191,30 @@ function getModalHtml(
 			font-size: 13px;
 		}
 
+		.selection-input[readonly] {
+			opacity: 0.95;
+		}
+
 	</style>
 	</head>
 
 	<body>
-	<h2>AI Annotation</h2>
+	<div class="header">
+		<h2>AI Annotation</h2>
+		<button class="icon-btn" type="button" aria-label="Close" onclick="cancel()">×</button>
+	</div>
 
 	<label>Quick Select Tool</label>
 	<div class="quick-tools">
-		<button onclick="setTool('ChatGPT')">ChatGPT</button>
-		<button onclick="setTool('Copilot')">Copilot</button>
-		<button onclick="setTool('Claude')">Claude</button>
-		<button onclick="setTool('Gemini')">Gemini</button>
-		<button onclick="setTool('Stack Overflow')">StackOverflow</button>
-		<button onclick="setTool('GeeksforGeeks')">GFG</button>
-		<button onclick="setTool('GitHub')">GitHub</button>
-		<button onclick="setTool('Other')">Other</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="ChatGPT" onclick="setTool('ChatGPT')">ChatGPT</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="Cursor" onclick="setTool('Cursor')">Cursor</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="Copilot" onclick="setTool('Copilot')">Copilot</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="Claude" onclick="setTool('Claude')">Claude</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="Gemini" onclick="setTool('Gemini')">Gemini</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="Stack Overflow" onclick="setTool('Stack Overflow')">StackOverflow</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="GeeksforGeeks" onclick="setTool('GeeksforGeeks')">GFG</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="GitHub" onclick="setTool('GitHub')">GitHub</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="Other" onclick="setTool('Other')">Other</button>
 	</div>
 
 	
@@ -182,13 +223,10 @@ function getModalHtml(
 	<div id="modelButtons" class="quick-tools"></div>
 
 	<label>Selected Tool</label>
-	<div id="selectedTool" class="selection-box">None</div>
-
-	<label>Quick Select Model</label>
-	<div id="modelButtons" class="quick-tools"></div>
+	<input id="selectedTool" class="selection-box selection-input" type="text" value="None" readonly />
 
 	<label>Selected Model</label>
-	<div id="selectedModel" class="selection-box">None</div>
+	<input id="selectedModel" class="selection-box selection-input" type="text" value="None" readonly />
 
 	<label>Prompt</label>
 	<textarea id="prompt" placeholder="Paste prompt (optional)...">${prompt}</textarea>
@@ -220,6 +258,7 @@ function getModalHtml(
 	// =========================
 	const MODEL_MAP = {
 		"ChatGPT": ["GPT-4o", "GPT-4.1", "GPT-5", "o3", "o4-mini", "Other"],
+		"Cursor": ["Auto", "Claude 3.5 Sonnet", "GPT-4.1/o3-mini", "Gemini 2.5 Pro", "Other"],
 		"Claude": ["Claude 3 Haiku", "Claude 3 Sonnet", "Claude 3.5 Sonnet", "Claude 3.7 Sonnet", "Other"],
 		"Gemini": ["Gemini 1.0 Pro", "Gemini 1.5 Pro", "Gemini 1.5 Flash", "Gemini Ultra", "Other"],
 		"Copilot": ["Copilot GPT-4", "Copilot GPT-4o", "Copilot Workspace", "Copilot Chat", "Other"],
@@ -243,12 +282,23 @@ function getModalHtml(
 		models.forEach(m => {
 			const btn = document.createElement("button");
 			btn.type = "button"; 
+			btn.className = "quick-btn model-btn";
+			btn.dataset.model = m;
 			btn.textContent = m;
 
 			btn.onclick = () => setModel(m);
 
 			container.appendChild(btn);
 		});
+
+		// If a model is already selected (e.g. editing), reflect it in the buttons.
+		const modelBox = document.getElementById('selectedModel');
+		const currentModel = modelBox ? modelBox.value : '';
+		if (currentModel && currentModel !== 'None') {
+			for (const btn of document.querySelectorAll('.model-btn')) {
+				btn.classList.toggle('selected', btn.dataset.model === currentModel);
+			}
+		}
 	}
 
 	// =========================
@@ -256,13 +306,36 @@ function getModalHtml(
 	// =========================
 	function setTool(t) {
 		const toolBox = document.getElementById('selectedTool');
-		if (toolBox) toolBox.textContent = t;
+		if (toolBox) {
+			if (t === 'Other') {
+				toolBox.value = '';
+				toolBox.placeholder = 'Other';
+				toolBox.readOnly = false;
+				toolBox.focus();
+			} else {
+				toolBox.value = t;
+				toolBox.placeholder = '';
+				toolBox.readOnly = true;
+			}
+		}
+
+		for (const btn of document.querySelectorAll('.tool-btn')) {
+			btn.classList.toggle('selected', btn.dataset.tool === t);
+		}
 
 		renderModelButtons(t);
 
 		// reset model when tool changes
 		const modelBox = document.getElementById('selectedModel');
-		if (modelBox) modelBox.textContent = "None";
+		if (modelBox) {
+			modelBox.value = "None";
+			modelBox.placeholder = "";
+			modelBox.readOnly = true;
+		}
+
+		for (const btn of document.querySelectorAll('.model-btn')) {
+			btn.classList.remove('selected');
+		}
 	}
 
 	// =========================
@@ -270,7 +343,22 @@ function getModalHtml(
 	// =========================
 	function setModel(m) {
 	const modelBox = document.getElementById('selectedModel');
-		if (modelBox) modelBox.textContent = m;
+		if (modelBox) {
+			if (m === 'Other') {
+				modelBox.value = '';
+				modelBox.placeholder = 'Other';
+				modelBox.readOnly = false;
+				modelBox.focus();
+			} else {
+				modelBox.value = m;
+				modelBox.placeholder = '';
+				modelBox.readOnly = true;
+			}
+		}
+
+		for (const btn of document.querySelectorAll('.model-btn')) {
+			btn.classList.toggle('selected', btn.dataset.model === m);
+		}
 	}
 
 	// =========================
@@ -278,11 +366,45 @@ function getModalHtml(
 	// =========================
 	window.addEventListener('DOMContentLoaded', () => {
 		const initialTool = "${tool}" || "ChatGPT";
+		const knownTools = new Set(Array.from(document.querySelectorAll('.tool-btn')).map((b) => b.dataset.tool));
+		const toolIsKnown = knownTools.has(initialTool);
 
-		const toolBox = document.getElementById('selectedTool');
-		if (toolBox) toolBox.textContent = initialTool;
+		if (toolIsKnown) {
+			setTool(initialTool);
+		} else {
+			// Treat persisted custom values as "Other" so the field stays editable.
+			setTool('Other');
+			const toolBox = document.getElementById('selectedTool');
+			if (toolBox) {
+				toolBox.value = initialTool;
+				toolBox.placeholder = 'Other';
+				toolBox.readOnly = false;
+			}
+		}
 
-		renderModelButtons(initialTool);
+		// Preselect model if editing existing annotation.
+		const initialModel = "${model}" || "";
+		if (initialModel) {
+			// Only treat the model as "known" if it exists in the currently rendered model list.
+			const knownModels = new Set(Array.from(document.querySelectorAll('.model-btn')).map((b) => b.dataset.model));
+			if (knownModels.has(initialModel)) {
+				setModel(initialModel);
+			} else {
+				setModel('Other');
+				const modelBox = document.getElementById('selectedModel');
+				if (modelBox) {
+					modelBox.value = initialModel;
+					modelBox.placeholder = 'Other';
+					modelBox.readOnly = false;
+				}
+			}
+		}
+	});
+
+	window.addEventListener('keydown', (e) => {
+		if (e && e.key === 'Escape') {
+			cancel();
+		}
 	});
 
 	// =========================
@@ -297,8 +419,8 @@ function getModalHtml(
 
 		vscode.postMessage({
 			type: 'submit',
-			tool: document.getElementById('selectedTool').textContent,
-			model: document.getElementById('selectedModel').textContent,
+			tool: document.getElementById('selectedTool').value || document.getElementById('selectedTool').placeholder,
+			model: document.getElementById('selectedModel').value || document.getElementById('selectedModel').placeholder,
 			prompt: document.getElementById('prompt').value,
 			notes: document.getElementById('notes').value,
 			startLine,

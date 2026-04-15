@@ -58,9 +58,32 @@ function getModalHtml(existing?: AiMetadata): string {
 			color: #ddd;
 		}
 
-		h2 {
+		.header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
 			margin-bottom: 12px;
+		}
+
+		h2 {
+			margin: 0;
 			font-size: 18px;
+		}
+
+		.icon-btn {
+			border: 1px solid #444;
+			background: transparent;
+			color: #ddd;
+			border-radius: 8px;
+			width: 32px;
+			height: 32px;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			cursor: pointer;
+			font-size: 18px;
+			line-height: 1;
 		}
 
 		label {
@@ -119,29 +142,47 @@ function getModalHtml(existing?: AiMetadata): string {
 			border-radius: 6px;
 			padding: 4px 8px;
 		}
+
+		.quick-btn {
+			border: 1px solid #444;
+		}
+
+		.quick-btn.selected {
+			background: #007acc;
+			color: white;
+			border-color: #007acc;
+		}
 	</style>
 	</head>
 
 	<body>
-	<h2>AI Annotation</h2>
+	<div class="header">
+		<h2>AI Annotation</h2>
+		<button class="icon-btn" type="button" aria-label="Close" onclick="cancel()">×</button>
+	</div>
 
 	<label>Quick Select Tool</label>
 	<div class="quick-tools">
-		<button onclick="setTool('ChatGPT')">ChatGPT</button>
-		<button onclick="setTool('Copilot')">Copilot</button>
-		<button onclick="setTool('Claude')">Claude</button>
-		<button onclick="setTool('Stack Overflow')">StackOverflow</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="ChatGPT" onclick="setTool('ChatGPT')">ChatGPT</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="Cursor" onclick="setTool('Cursor')">Cursor</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="Copilot" onclick="setTool('Copilot')">Copilot</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="Claude" onclick="setTool('Claude')">Claude</button>
+		<button class="quick-btn tool-btn" type="button" data-tool="Stack Overflow" onclick="setTool('Stack Overflow')">StackOverflow</button>
 	</div>
 
 	<label>Tool</label>
 	<select id="tool">
 		<option>ChatGPT</option>
+		<option>Cursor</option>
 		<option>Copilot</option>
 		<option>Claude</option>
 		<option>Stack Overflow</option>
 		<option>GitHub</option>
 		<option>Other</option>
 	</select>
+
+	<label>Quick Select Model</label>
+	<div id="modelButtons" class="quick-tools"></div>
 
 	<div class="row">
 		<div>
@@ -166,8 +207,65 @@ function getModalHtml(existing?: AiMetadata): string {
 
 		document.getElementById('tool').value = "${tool}";
 
+		const MODEL_MAP = {
+			"ChatGPT": ["GPT-4o", "GPT-4.1", "GPT-5", "o3", "o4-mini", "Other"],
+			"Cursor": ["Auto", "Claude 3.5 Sonnet", "GPT-4.1/o3-mini", "Gemini 2.5 Pro", "Other"],
+			"Claude": ["Claude 3 Haiku", "Claude 3 Sonnet", "Claude 3.5 Sonnet", "Claude 3.7 Sonnet", "Other"],
+			"Copilot": ["Copilot GPT-4", "Copilot GPT-4o", "Copilot Workspace", "Copilot Chat", "Other"],
+			"Stack Overflow": ["Human Answer", "Community Answer", "Accepted Answer", "AI-generated Answer", "Other"],
+			"GitHub": [],
+			"Other": []
+		};
+
+		function renderModelButtons(tool) {
+			const container = document.getElementById('modelButtons');
+			if (!container) return;
+			container.innerHTML = '';
+
+			const models = MODEL_MAP[tool] || [];
+			for (const m of models) {
+				const btn = document.createElement('button');
+				btn.type = 'button';
+				btn.className = 'quick-btn model-btn';
+				btn.dataset.model = m;
+				btn.textContent = m;
+				btn.onclick = () => setModel(m);
+				container.appendChild(btn);
+			}
+
+			const currentModel = (document.getElementById('model')?.value || '').trim();
+			if (currentModel) {
+				for (const btn of document.querySelectorAll('.model-btn')) {
+					btn.classList.toggle('selected', btn.dataset.model === currentModel);
+				}
+			}
+		}
+
 		function setTool(t) {
 			document.getElementById('tool').value = t;
+
+			for (const btn of document.querySelectorAll('.tool-btn')) {
+				btn.classList.toggle('selected', btn.dataset.tool === t);
+			}
+
+			renderModelButtons(t);
+		}
+
+		function setModel(m) {
+			const modelEl = document.getElementById('model');
+			if (modelEl) {
+				if (m === 'Other') {
+					modelEl.value = '';
+					modelEl.placeholder = 'Other';
+				} else {
+					modelEl.value = m;
+					modelEl.placeholder = '';
+				}
+			}
+
+			for (const btn of document.querySelectorAll('.model-btn')) {
+				btn.classList.toggle('selected', btn.dataset.model === m);
+			}
 		}
 
 		function submit() {
@@ -183,6 +281,21 @@ function getModalHtml(existing?: AiMetadata): string {
 		function cancel() {
 			vscode.postMessage({ type: 'cancel' });
 		}
+
+		window.addEventListener('keydown', (e) => {
+			if (e && e.key === 'Escape') {
+				cancel();
+			}
+		});
+
+		window.addEventListener('DOMContentLoaded', () => {
+			const initialTool = "${tool}" || "ChatGPT";
+			setTool(initialTool);
+			const initialModel = "${model}" || "";
+			if (initialModel) {
+				setModel(initialModel);
+			}
+		});
 	</script>
 
 	</body>

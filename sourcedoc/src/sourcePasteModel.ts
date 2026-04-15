@@ -5,6 +5,7 @@ export type SourceType = 'ai';
 // predefined tools (for button UI)
 export const PREDEFINED_TOOLS = [
 	'ChatGPT',
+	'Cursor',
 	'Copilot',
 	'Claude',
 	'Stack Overflow',
@@ -74,6 +75,7 @@ function normalizeTool(tool?: string): string | undefined {
 
 	const map: Record<string, PredefinedTool> = {
 		chatgpt: 'ChatGPT',
+		cursor: 'Cursor',
 		copilot: 'Copilot',
 		claude: 'Claude',
 		stackoverflow: 'Stack Overflow',
