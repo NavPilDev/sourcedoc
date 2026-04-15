@@ -1,54 +1,74 @@
 import * as vscode from 'vscode';
-import { formatTime, SourcePasteModel } from './sourcePasteModel';
+import {
+	formatTime,
+	SourcePasteModel,
+	AIAnnotation,
+} from './sourcePasteModel';
 
-export type { SourcedPaste } from './sourcePasteModel';
+function escapeMarkdown(text: string): string {
+	return text.replace(/[`*_{}[\]()#+\-.!]/g, '\\$&');
+}
 
-function buildHoverMessage(
-	recordedAt: Date,
-	source: string,
-	reason: string,
-	range: vscode.Range,
-	ai?: { tool?: string; model?: string; prompt?: string; notes?: string }
-): vscode.MarkdownString {
-	const payload = {
-		Source: source,
-		Time: formatTime(recordedAt),
-		Reason: reason || '(none)',
-		AI: ai || undefined,
-		Bounds: {
-			startLine: range.start.line + 1,
-			startCharacter: range.start.character + 1,
-			endLine: range.end.line + 1,
-			endCharacter: range.end.character + 1,
-		},
-	};
-	const ms = new vscode.MarkdownString();
-	ms.appendCodeblock(JSON.stringify(payload, null, 2), 'json');
+function truncate(text: string, max = 200): string {
+	if (!text) return '';
+	return text.length > max ? text.slice(0, max) + '...' : text;
+}
+
+function buildHoverMessage(annotation: AIAnnotation): vscode.MarkdownString {
+	const lines: string[] = [];
+
+	lines.push(`**AI Annotation**`);
+	lines.push(`**Time:** ${formatTime(annotation.recordedAt)}`);
+
+	if (annotation.source.tool) {
+		lines.push(`**Tool:** ${escapeMarkdown(annotation.source.tool)}`);
+	}
+	if (annotation.source.model) {
+		lines.push(`**Model:** ${escapeMarkdown(annotation.source.model)}`);
+	}
+
+	if (annotation.source.prompt) {
+		const safePrompt = escapeMarkdown(truncate(annotation.source.prompt));
+		lines.push(`**Prompt:**`);
+		lines.push('```');
+		lines.push(safePrompt);
+		lines.push('```');
+	}
+
+	if (annotation.source.notes) {
+		lines.push(`**Notes:** ${escapeMarkdown(annotation.source.notes)}`);
+	}
+
+	if (annotation.textPreview) {
+		lines.push(`---`);
+		lines.push(`**Preview:**`);
+		lines.push(`\`${escapeMarkdown(annotation.textPreview)}\``);
+	}
+
+	lines.push(`---`);
+	lines.push(`[Edit Annotation](command:sourcedoc.annotateExisting?${encodeURIComponent(JSON.stringify(annotation.id))})`);
+	lines.push(`[Delete Annotation](command:sourcedoc.deleteAnnotation?${encodeURIComponent(JSON.stringify(annotation.id))})`);
+
+	const ms = new vscode.MarkdownString(lines.join('\n\n'));
 	ms.isTrusted = true;
 	return ms;
 }
 
 export class SourceMarkers implements vscode.Disposable {
-	private readonly decorationType: vscode.TextEditorDecorationType;
-	private readonly aiDecorationType: vscode.TextEditorDecorationType;
+	private readonly aiDecoration: vscode.TextEditorDecorationType;
 	private readonly model: SourcePasteModel;
 	private readonly modelListener: vscode.Disposable;
 
 	constructor(model: SourcePasteModel) {
 		this.model = model;
-		this.decorationType = vscode.window.createTextEditorDecorationType({
-			isWholeLine: true,
-			backgroundColor: 'rgba(80, 200, 255, 0.12)',
-			overviewRulerColor: 'rgba(80, 200, 255, 0.45)',
+
+		this.aiDecoration = vscode.window.createTextEditorDecorationType({
+			backgroundColor: 'rgba(160, 110, 255, 0.14)',
+			overviewRulerColor: 'rgba(160, 110, 255, 0.75)',
 			overviewRulerLane: vscode.OverviewRulerLane.Left,
+			borderRadius: '3px',
 		});
-		this.aiDecorationType = vscode.window.createTextEditorDecorationType({
-			isWholeLine: true,
-			backgroundColor: 'rgba(160, 110, 255, 0.06)',
-			overviewRulerColor: 'rgba(160, 110, 255, 0.55)',
-			overviewRulerLane: vscode.OverviewRulerLane.Left,
-			border: '1px solid rgba(160, 110, 255, 0.35)',
-		});
+
 		this.modelListener = model.onDidChange((uri) => {
 			this.refreshEditorsForDocument(uri);
 		});
@@ -56,24 +76,18 @@ export class SourceMarkers implements vscode.Disposable {
 
 	dispose(): void {
 		this.modelListener.dispose();
-		this.decorationType.dispose();
-		this.aiDecorationType.dispose();
+		this.aiDecoration.dispose();
 	}
 
 	refreshEditor(editor: vscode.TextEditor): void {
-		const pastes = this.model.getPastes(editor.document.uri);
-		const options: vscode.DecorationOptions[] = pastes.map((p) => ({
-			range: p.range,
-			hoverMessage: buildHoverMessage(p.recordedAt, p.source, p.reason, p.range, p.ai),
-		}));
-		editor.setDecorations(this.decorationType, options);
+		const annotations = this.model.getAnnotations(editor.document.uri);
 
-		const aiOptions: vscode.DecorationOptions[] = pastes
-			.filter((p) => Boolean(p.ai))
-			.map((p) => ({
-				range: p.range,
-			}));
-		editor.setDecorations(this.aiDecorationType, aiOptions);
+		const options: vscode.DecorationOptions[] = annotations.map((annotation) => ({
+			range: annotation.range,
+			hoverMessage: buildHoverMessage(annotation),
+		}));
+
+		editor.setDecorations(this.aiDecoration, options);
 	}
 
 	private refreshEditorsForDocument(uri: vscode.Uri): void {

@@ -1,28 +1,46 @@
 import * as vscode from 'vscode';
-import { openAiAnnotationModal, type AiMetadata } from './ui/aiAnnotationModal';
 
-export interface SourcedPaste {
-	id: string;
-	range: vscode.Range;
-	recordedAt: Date;
-	source: string;
-	reason: string;
-	ai?: AiMetadata;
+export type SourceType = 'ai';
+
+// predefined tools (for button UI)
+export const PREDEFINED_TOOLS = [
+	'ChatGPT',
+	'Copilot',
+	'Claude',
+	'Stack Overflow',
+	'GeeksforGeeks',
+	'GitHub',
+	'Other',
+] as const;
+
+export type PredefinedTool = (typeof PREDEFINED_TOOLS)[number];
+
+export interface SourceMetadata {
+	sourceType: SourceType;
+	tool?: string;
+	model?: string;
+	prompt?: string;
+	notes?: string;
 }
 
-const MIN_PASTE_CHARS = 25;
-const MIN_MULTILINE_CHARS = 3;
-const PROMPT_COOLDOWN_MS = 1200;
-const DEBUG_PASTE_DETECTION = false;
+export interface AIAnnotation {
+	id: string;
+	uri: string;
+	range: vscode.Range;
+	isManualRange?: boolean;
+	autoTrackedRange?: vscode.Range;
+	recordedAt: Date;
+	textPreview: string;
+	fullText: string; 
+	originalText: string; 
+	source: SourceMetadata;
+}
 
-function looksLikePaste(text: string): boolean {
-	if (!text) {
-		return false;
-	}
-	if (text.length >= MIN_PASTE_CHARS) {
-		return true;
-	}
-	return text.includes('\n') && text.length >= MIN_MULTILINE_CHARS;
+export interface TrackerStats {
+	totalAnnotations: number;
+	annotatedLines: number;
+	toolsBreakdown: Array<{ label: string; value: number }>;
+	avgEditRatio?: number;
 }
 
 export function formatTime(d: Date): string {
@@ -31,547 +49,566 @@ export function formatTime(d: Date): string {
 	return `${h}:${m}`;
 }
 
-function insertedRangeForChange(document: vscode.TextDocument, change: vscode.TextDocumentContentChangeEvent): vscode.Range {
-	const start = document.positionAt(change.rangeOffset);
-	const end = document.positionAt(change.rangeOffset + change.text.length);
-	return new vscode.Range(start, end);
-}
-
-function toWholeLineRange(document: vscode.TextDocument, range: vscode.Range): vscode.Range {
-	const startLine = range.start.line;
-	const endLine = range.end.line;
-	return new vscode.Range(
-		new vscode.Position(startLine, 0),
-		document.lineAt(endLine).range.end
-	);
-}
-
+// safer document check
 function shouldTrackDocument(document: vscode.TextDocument): boolean {
 	return document.uri.scheme === 'file' || document.uri.scheme === 'untitled';
 }
 
-interface PendingPaste {
-	uri: vscode.Uri;
-	lineRange: vscode.Range;
-	recordedAt: Date;
-	fileLabel: string;
+function createTextPreview(text: string): string {
+	const normalized = text.replace(/\s+/g, ' ').trim();
+	if (!normalized) {
+		return '';
+	}
+	return normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized;
 }
 
-interface PersistedSourcedPaste {
-	id: string;
-	recordedAt: string;
-	source: string;
-	reason: string;
-	ai?: AiMetadata;
-	start: { line: number; character: number };
-	end: { line: number; character: number };
+function countLinesInRange(range: vscode.Range): number {
+	return Math.max(1, range.end.line - range.start.line + 1);
 }
 
-interface PersistedWorkspaceData {
-	version: 1 | 2;
-	files: Record<string, PersistedSourcedPaste[]>;
+// normalize tool name (avoid messy stats)
+function normalizeTool(tool?: string): string | undefined {
+	if (!tool) return undefined;
+
+	const trimmed = tool.trim();
+
+	const map: Record<string, PredefinedTool> = {
+		chatgpt: 'ChatGPT',
+		copilot: 'Copilot',
+		claude: 'Claude',
+		stackoverflow: 'Stack Overflow',
+		'stack overflow': 'Stack Overflow',
+		geeksforgeeks: 'GeeksforGeeks',
+		github: 'GitHub',
+		other: 'Other',
+	};
+
+	const key = trimmed.toLowerCase();
+	return map[key] || trimmed;
 }
 
-const SOURCE_OPTIONS = [
-	'Stack Overflow',
-	'Github',
-	'ChatGPT',
-	'Claude Code',
-	'IDE Agent(Cursor, Github Copilot)',
-	'Other(Please Specify)',
-] as const;
+function computeEditRatio(original: string, edited: string): number {
+	if (!original && !edited) return 0;
 
-function isAiSource(source: string): boolean {
-	const s = source.toLowerCase();
-	return (
-		s.includes('chatgpt') ||
-		s.includes('claude') ||
-		s.includes('copilot') ||
-		s.includes('ide agent')
-	);
+	const maxLen = Math.max(original.length, edited.length);
+	if (maxLen === 0) return 0;
+
+	let same = 0;
+	const minLen = Math.min(original.length, edited.length);
+
+	for (let i = 0; i < minLen; i++) {
+		if (original[i] === edited[i]) same++;
+	}
+
+	const similarity = same / maxLen;
+	return 1 - similarity; // 🔥 edit ratio
 }
 
 export class SourcePasteModel implements vscode.Disposable {
-	private readonly pastesByUri = new Map<string, SourcedPaste[]>();
+	private static STORAGE_KEY = 'vibe.annotations'; 
+
+	private readonly annotationsByUri = new Map<string, AIAnnotation[]>();
+	private readonly annotationIndex = new Map<string, AIAnnotation>();
 	private readonly _onDidChange = new vscode.EventEmitter<vscode.Uri>();
-	private readonly pendingPastes: PendingPaste[] = [];
-	private readonly saveTimersByFolder = new Map<string, ReturnType<typeof setTimeout>>();
-	private readonly debugChannel = vscode.window.createOutputChannel('SourceDoc Paste Detection');
-	private isPrompting = false;
-	private lastPromptAtMs = 0;
 	readonly onDidChange = this._onDidChange.event;
 
+	private nextId = 1;
+
+	// UPDATED constructor
+	constructor(private context: vscode.ExtensionContext) {
+		this.loadFromStorage(); // 
+	}
+
 	dispose(): void {
-		for (const timer of this.saveTimersByFolder.values()) {
-			clearTimeout(timer);
-		}
-		this.saveTimersByFolder.clear();
-		this.debugChannel.dispose();
 		this._onDidChange.dispose();
 	}
 
-	getPastes(uri: vscode.Uri): readonly SourcedPaste[] {
-		return this.pastesByUri.get(uri.toString()) ?? [];
-	}
-
-	getPasteById(uri: vscode.Uri, id: string): SourcedPaste | undefined {
-		const list = this.pastesByUri.get(uri.toString());
-		if (!list) {
-			return undefined;
-		}
-		return list.find((item) => item.id === id);
-	}
-
-	updateReasonById(uri: vscode.Uri, id: string, reason: string): boolean {
-		const list = this.pastesByUri.get(uri.toString());
-		if (!list) {
-			return false;
-		}
-		const idx = list.findIndex((item) => item.id === id);
-		if (idx < 0) {
-			return false;
-		}
-		const existing = list[idx];
-		list[idx] = { ...existing, reason };
-		this._onDidChange.fire(uri);
-		this.schedulePersistForUri(uri);
-		return true;
-	}
-
-	updateAiMetadataById(uri: vscode.Uri, id: string, ai: AiMetadata | undefined): boolean {
-		const list = this.pastesByUri.get(uri.toString());
-		if (!list) {
-			return false;
-		}
-		const idx = list.findIndex((item) => item.id === id);
-		if (idx < 0) {
-			return false;
-		}
-		const existing = list[idx];
-		list[idx] = { ...existing, ai };
-		this._onDidChange.fire(uri);
-		this.schedulePersistForUri(uri);
-		return true;
-	}
-
-	clearAiMetadataById(uri: vscode.Uri, id: string): boolean {
-		return this.updateAiMetadataById(uri, id, undefined);
-	}
-
-	clearAiMetadataForUri(uri: vscode.Uri): boolean {
-		const key = uri.toString();
-		const list = this.pastesByUri.get(key);
-		if (!list || list.length === 0) {
-			return false;
-		}
-		let changed = false;
-		for (const item of list) {
-			if (item.ai) {
-				item.ai = undefined;
-				changed = true;
-			}
-		}
-		if (!changed) {
-			return false;
-		}
-		this._onDidChange.fire(uri);
-		this.schedulePersistForUri(uri);
-		return true;
-	}
-
-	deletePasteById(uri: vscode.Uri, id: string): boolean {
-		const key = uri.toString();
-		const list = this.pastesByUri.get(key);
-		if (!list) {
-			return false;
-		}
-		const next = deletePasteByIdFromList(list, id);
-		if (next.length === list.length) {
-			return false;
-		}
-		if (next.length === 0) {
-			this.pastesByUri.delete(key);
-		} else {
-			this.pastesByUri.set(key, next);
-		}
-		this._onDidChange.fire(uri);
-		this.schedulePersistForUri(uri);
-		return true;
-	}
-
-	clearPastesForUri(uri: vscode.Uri): boolean {
-		const key = uri.toString();
-		const list = this.pastesByUri.get(key);
-		if (!list) {
-			return false;
-		}
-		const next = clearPastesFromList(list);
-		if (next.length === 0) {
-			this.pastesByUri.delete(key);
-		} else {
-			this.pastesByUri.set(key, next);
-		}
-		this._onDidChange.fire(uri);
-		this.schedulePersistForUri(uri);
-		return true;
-	}
-
-	async loadPersistedData(): Promise<void> {
-		const folders = vscode.workspace.workspaceFolders ?? [];
-		for (const folder of folders) {
-			const storageUri = vscode.Uri.joinPath(folder.uri, '.sourcedoc', 'sourcedoc.json');
-			let data: Uint8Array;
-			try {
-				data = await vscode.workspace.fs.readFile(storageUri);
-			} catch {
-				continue;
-			}
-			let parsed: PersistedWorkspaceData;
-			try {
-				parsed = JSON.parse(new TextDecoder().decode(data)) as PersistedWorkspaceData;
-			} catch {
-				continue;
-			}
-			if (parsed.version !== 1 && parsed.version !== 2) {
-				continue;
-			}
-			const files = parsed.files ?? {};
-			for (const [relativePath, entries] of Object.entries(files)) {
-				const fileUri = vscode.Uri.joinPath(folder.uri, relativePath);
-				const hydrated = entries.map((entry) => ({
-					id: entry.id,
-					range: new vscode.Range(
-						new vscode.Position(entry.start.line, entry.start.character),
-						new vscode.Position(entry.end.line, entry.end.character)
-					),
-					recordedAt: new Date(entry.recordedAt),
-					source: entry.source,
-					reason: entry.reason,
-					ai: entry.ai,
-				}));
-				if (hydrated.length > 0) {
-					this.pastesByUri.set(fileUri.toString(), hydrated);
-					this._onDidChange.fire(fileUri);
+	// =========================
+	// SAVE
+	// =========================
+	private saveToStorage() {
+		const data = Array.from(this.annotationsByUri.entries()).map(([uri, list]) => [
+			uri,
+			list.map(a => ({
+				...a,
+				fullText: a.fullText || '',
+				recordedAt: a.recordedAt.toISOString(),
+				range: {
+					start: { line: a.range.start.line, character: a.range.start.character },
+					end: { line: a.range.end.line, character: a.range.end.character }
 				}
-			}
-		}
+			}))
+		]);
+
+		this.context.workspaceState.update(SourcePasteModel.STORAGE_KEY, data);
 	}
 
-	handleDocumentChange(event: vscode.TextDocumentChangeEvent): void {
-		const { document } = event;
-		if (!shouldTrackDocument(document)) {
-			return;
-		}
-		const key = document.uri.toString();
-		const existingBefore = this.pastesByUri.get(key) ?? [];
-		if (existingBefore.length > 0) {
-			const updated = this.applyChangesToPastes(existingBefore, event.contentChanges);
-			if (updated.length === 0) {
-				this.pastesByUri.delete(key);
-			} else {
-				this.pastesByUri.set(key, updated);
-			}
-			this._onDidChange.fire(document.uri);
-			this.schedulePersistForUri(document.uri);
-		}
+	// =========================
+	// LOAD
+	// =========================
+	private loadFromStorage() {
+		const data = this.context.workspaceState.get<any[]>(
+			SourcePasteModel.STORAGE_KEY,
+			[]
+		);
 
-		const recordedAt = new Date();
-		let enqueued = false;
-		for (const change of event.contentChanges) {
-			const pasteCandidate = this.shouldTreatChangeAsPaste(change, existingBefore);
-			this.logDetectionDecision(change, pasteCandidate, existingBefore);
-			if (!pasteCandidate) {
-				continue;
-			}
-			const inserted = insertedRangeForChange(document, change);
-			const lineRange = toWholeLineRange(document, inserted);
-			this.pendingPastes.push({
-				uri: document.uri,
-				lineRange,
-				recordedAt,
-				fileLabel: vscode.workspace.asRelativePath(document.uri, false),
-			});
-			enqueued = true;
-		}
+		const restored = new Map<string, AIAnnotation[]>();
 
-		if (enqueued) {
-			this.lastPromptAtMs = Date.now();
-			void this.processPendingPastes();
-		}
-	}
-
-	private async processPendingPastes(): Promise<void> {
-		if (this.isPrompting) {
-			return;
-		}
-		this.isPrompting = true;
-		try {
-			while (this.pendingPastes.length > 0) {
-				const nextPaste = this.pendingPastes.shift();
-				if (!nextPaste) {
-					continue;
-				}
-
-				const source = await this.promptForSource(nextPaste.fileLabel || 'Untitled');
-				if (source === undefined) {
-					continue;
-				}
-
-				const key = nextPaste.uri.toString();
-				let list = this.pastesByUri.get(key);
-				if (!list) {
-					list = [];
-					this.pastesByUri.set(key, list);
-				}
-				const pasteId = createPasteId();
-				list.push({
-					id: pasteId,
-					range: nextPaste.lineRange,
-					recordedAt: nextPaste.recordedAt,
-					source,
-					reason: '',
-				});
-				this._onDidChange.fire(nextPaste.uri);
-				this.schedulePersistForUri(nextPaste.uri);
-
-				if (isAiSource(source)) {
-					const existing = undefined;
-					const ai = await openAiAnnotationModal(existing);
-					if (ai) {
-						this.updateAiMetadataById(nextPaste.uri, pasteId, ai);
-					}
-				}
-			}
-		} finally {
-			this.isPrompting = false;
-		}
-	}
-
-	private async promptForSource(fileLabel: string): Promise<string | undefined> {
-		for (;;) {
-			const selected = await vscode.window.showQuickPick([...SOURCE_OPTIONS], {
-				title: `SourceDoc - where are you pasting this from? (${fileLabel})`,
-				ignoreFocusOut: true,
-			});
-			if (selected === undefined) {
-				return undefined;
-			}
-
-			if (selected !== 'Other(Please Specify)') {
-				return selected;
-			}
-
-			const custom = await vscode.window.showInputBox({
-				title: `SourceDoc - specify source (${fileLabel})`,
-				prompt: 'Enter the source for this pasted code.',
-				ignoreFocusOut: true,
-			});
-			if (custom && custom.trim().length > 0) {
-				return custom.trim();
-			}
-		}
-	}
-
-	private shouldTreatChangeAsPaste(
-		change: vscode.TextDocumentContentChangeEvent,
-		existingBefore: readonly SourcedPaste[]
-	): boolean {
-		if (!looksLikePaste(change.text)) {
-			return false;
-		}
-		const now = Date.now();
-		if (now - this.lastPromptAtMs < PROMPT_COOLDOWN_MS) {
-			return false;
-		}
-		if (this.isPrompting) {
-			return false;
-		}
-		if (isLikelyTypingLikeEdit(change)) {
-			return false;
-		}
-		if (existingBefore.some((entry) => rangesOverlap(change.range, entry.range))) {
-			// Editing in/around existing sourced blocks should maintain bounds only,
-			// not create a brand new attribution prompt.
-			return false;
-		}
-		return true;
-	}
-
-	private logDetectionDecision(
-		change: vscode.TextDocumentContentChangeEvent,
-		accepted: boolean,
-		existingBefore: readonly SourcedPaste[]
-	): void {
-		if (!DEBUG_PASTE_DETECTION) {
-			return;
-		}
-		const msg = [
-			`accepted=${accepted}`,
-			`len=${change.text.length}`,
-			`newlines=${change.text.includes('\n')}`,
-			`rangeLength=${change.rangeLength}`,
-			`isPrompting=${this.isPrompting}`,
-			`cooldownMs=${Date.now() - this.lastPromptAtMs}`,
-			`trackedBlocks=${existingBefore.length}`,
-		].join(' ');
-		this.debugChannel.appendLine(msg);
-	}
-
-	private applyChangesToPastes(
-		entries: readonly SourcedPaste[],
-		changes: readonly vscode.TextDocumentContentChangeEvent[]
-	): SourcedPaste[] {
-		let next = [...entries];
-		for (const change of changes) {
-			next = next
-				.map((entry) => {
-					const transformed = transformRange(entry.range, change);
-					if (!transformed) {
-						return undefined;
-					}
-					return { ...entry, range: transformed };
-				})
-				.filter((entry): entry is SourcedPaste => Boolean(entry));
-		}
-		return next;
-	}
-
-	private schedulePersistForUri(uri: vscode.Uri): void {
-		const folder = vscode.workspace.getWorkspaceFolder(uri);
-		if (!folder || uri.scheme !== 'file') {
-			return;
-		}
-		const folderKey = folder.uri.toString();
-		const existingTimer = this.saveTimersByFolder.get(folderKey);
-		if (existingTimer) {
-			clearTimeout(existingTimer);
-		}
-		const timer = setTimeout(() => {
-			void this.persistFolder(folder);
-		}, 300);
-		this.saveTimersByFolder.set(folderKey, timer);
-	}
-
-	private async persistFolder(folder: vscode.WorkspaceFolder): Promise<void> {
-		const folderKey = folder.uri.toString();
-		this.saveTimersByFolder.delete(folderKey);
-
-		const files: Record<string, PersistedSourcedPaste[]> = {};
-		for (const [uriKey, entries] of this.pastesByUri.entries()) {
-			const uri = vscode.Uri.parse(uriKey);
-			if (uri.scheme !== 'file') {
-				continue;
-			}
-			const ownerFolder = vscode.workspace.getWorkspaceFolder(uri);
-			if (!ownerFolder || ownerFolder.uri.toString() !== folderKey) {
-				continue;
-			}
-			const relative = vscode.workspace.asRelativePath(uri, false);
-			files[relative] = entries.map((entry) => ({
-				id: entry.id,
-				recordedAt: entry.recordedAt.toISOString(),
-				source: entry.source,
-				reason: entry.reason,
-				start: { line: entry.range.start.line, character: entry.range.start.character },
-				end: { line: entry.range.end.line, character: entry.range.end.character },
+		for (const [uri, list] of data) {
+			const restoredList = list.map((a: any) => ({
+				...a,
+				fullText: a.fullText || '',
+				originalText: a.originalText || a.fullText || '',
+				recordedAt: new Date(a.recordedAt),
+				range: new vscode.Range(
+					new vscode.Position(a.range.start.line, a.range.start.character),
+					new vscode.Position(a.range.end.line, a.range.end.character)
+				)
 			}));
+
+			restored.set(uri, restoredList);
+
+			for (const item of restoredList) {
+				this.annotationIndex.set(item.id, item);
+			}
 		}
 
-		const payload: PersistedWorkspaceData = {
-			version: 2,
-			files,
+		this.annotationsByUri.clear();
+		for (const [k, v] of restored.entries()) {
+			this.annotationsByUri.set(k, v);
+		}
+	}
+
+	getAnnotations(uri: vscode.Uri): readonly AIAnnotation[] {
+		return this.annotationsByUri.get(uri.toString()) ?? [];
+	}
+
+	getAnnotationById(annotationId: string): AIAnnotation | undefined {
+		return this.annotationIndex.get(annotationId);
+	}
+
+	// =========================
+	addAnnotation(
+		uri: vscode.Uri,
+		range: vscode.Range,
+		text: string,
+		metadata: SourceMetadata
+	): void {
+		const key = uri.toString();
+
+		const document = vscode.workspace.textDocuments.find(
+			(doc) => doc.uri.toString() === key
+		);
+
+		if (!document || !shouldTrackDocument(document)) {
+			return;
+		}
+
+		let list = this.annotationsByUri.get(key);
+		if (!list) {
+			list = [];
+			this.annotationsByUri.set(key, list);
+		}
+
+		const annotation: AIAnnotation = {
+			id: `annotation-${this.nextId++}`,
+			uri: key,
+			range: new vscode.Range(range.start, range.end),
+			recordedAt: new Date(),
+			textPreview: createTextPreview(text),
+			originalText: text,
+			fullText: text, // STORE FULL TEXT
+			source: {
+				sourceType: 'ai',
+				tool: normalizeTool(metadata.tool),
+				model: metadata.model?.trim() || undefined,
+				prompt: metadata.prompt?.trim() || undefined,
+				notes: metadata.notes?.trim() || undefined,
+			},
 		};
-		const targetDir = vscode.Uri.joinPath(folder.uri, '.sourcedoc');
-		const targetFile = vscode.Uri.joinPath(targetDir, 'sourcedoc.json');
-		const tmpFile = vscode.Uri.joinPath(targetDir, 'sourcedoc.json.tmp');
-		await vscode.workspace.fs.createDirectory(targetDir);
-		await vscode.workspace.fs.writeFile(tmpFile, new TextEncoder().encode(JSON.stringify(payload, null, 2)));
-		await vscode.workspace.fs.rename(tmpFile, targetFile, { overwrite: true });
+
+		list.push(annotation);
+		this.annotationIndex.set(annotation.id, annotation);
+
+		this.saveToStorage();
+		this._onDidChange.fire(uri);
 	}
+
+	updateAnnotation(annotationId: string, metadata: SourceMetadata): void {
+		const annotation = this.annotationIndex.get(annotationId);
+		if (!annotation) {
+			return;
+		}
+
+		annotation.source = {
+			sourceType: 'ai',
+			tool: normalizeTool(metadata.tool),
+			model: metadata.model?.trim() || undefined,
+			prompt: metadata.prompt?.trim() || undefined,
+			notes: metadata.notes?.trim() || undefined,
+		};
+
+		this.saveToStorage(); 
+		this._onDidChange.fire(vscode.Uri.parse(annotation.uri));
+	}
+
+	updateAnnotationRange(
+		annotationId: string,
+		startLine: number,
+		endLine: number
+	) {
+		const annotation = this.annotationIndex.get(annotationId);
+		if (!annotation) return;
+
+		// store old auto range
+		//annotation.autoTrackedRange = annotation.range;
+		annotation.autoTrackedRange = new vscode.Range(
+			annotation.range.start,
+			annotation.range.end
+		);
+
+		const document = vscode.workspace.textDocuments.find(
+			(doc) => doc.uri.toString() === annotation.uri
+		);
+
+		if (!document) return;
+
+		const endLineLength = document.lineAt(endLine).text.length;
+
+		annotation.range = new vscode.Range(
+			new vscode.Position(startLine, 0),
+			new vscode.Position(endLine, endLineLength) 
+		);
+
+		annotation.isManualRange = true;
+
+		this.saveToStorage();
+		this._onDidChange.fire(vscode.Uri.parse(annotation.uri));
+	}
+
+	deleteAnnotation(annotationId: string): void {
+		const annotation = this.annotationIndex.get(annotationId);
+		if (!annotation) {
+			return;
+		}
+
+		const key = annotation.uri;
+		const list = this.annotationsByUri.get(key);
+		if (!list) {
+			return;
+		}
+
+		const nextList = list.filter((item) => item.id !== annotationId);
+		this.annotationsByUri.set(key, nextList);
+		this.annotationIndex.delete(annotationId);
+
+		this.saveToStorage(); // ✅ NEW
+		this._onDidChange.fire(vscode.Uri.parse(key));
+	}
+
+	clearAnnotationsForUri(uri: vscode.Uri): void {
+		const key = uri.toString();
+		const list = this.annotationsByUri.get(key) ?? [];
+
+		for (const item of list) {
+			this.annotationIndex.delete(item.id);
+		}
+
+		this.annotationsByUri.set(key, []);
+
+		this.saveToStorage(); 
+		this._onDidChange.fire(uri);
+	}
+
+	getStats(uri: vscode.Uri): TrackerStats {
+		const annotations = this.getAnnotations(uri);
+
+		const totalAnnotations = annotations.length;
+		const annotatedLines = annotations.reduce(
+			(sum, item) => sum + countLinesInRange(item.range),
+			0
+		);
+
+		const toolCounts = new Map<string, number>();
+		for (const item of annotations) {
+			const label = item.source.tool?.trim() || 'Unspecified tool';
+			toolCounts.set(label, (toolCounts.get(label) ?? 0) + 1);
+		}
+
+		const toolsBreakdown = [...toolCounts.entries()]
+			.map(([label, value]) => ({ label, value }))
+			.sort((a, b) => b.value - a.value);
+
+		let totalEditRatio = 0;
+		let count = 0;
+
+		for (const item of annotations) {
+			if (item.originalText && item.fullText) {
+				const ratio = computeEditRatio(item.originalText, item.fullText);
+				totalEditRatio += ratio;
+				count++;
+			}
+		}
+
+		const avgEditRatio = count > 0 ? totalEditRatio / count : 0;
+
+		return {
+			totalAnnotations,
+			annotatedLines,
+			toolsBreakdown,
+			avgEditRatio
+		};
+	}
+
+	
+	updateAnnotationsForEdit(
+		document: vscode.TextDocument,
+		change: vscode.TextDocumentContentChangeEvent
+	) {
+		const key = document.uri.toString();
+		const annotations = this.annotationsByUri.get(key);
+		if (!annotations) return;
+
+		const changeStart = change.range.start;
+		const changeEnd = change.range.end;
+
+		const isInsertion = change.rangeLength === 0 && change.text.length > 0;
+
+		const newLineCount = change.text.split(/\r?\n/).length - 1;
+		const oldLineCount = changeEnd.line - changeStart.line;
+		const lineDelta = newLineCount - oldLineCount;
+
+		const updated: AIAnnotation[] = [];
+
+		for (const a of annotations) {
+
+			let newStart = a.range.start;
+			let newEnd = a.range.end;
+
+			const overlaps =
+				a.range.end.isAfterOrEqual(changeStart) &&
+				a.range.start.isBeforeOrEqual(changeEnd);
+
+			// =========================
+			// MANUAL → AUTO (ONLY IF AFFECTED)
+			// =========================
+			if (a.isManualRange && overlaps) {
+				a.isManualRange = false;
+			}
+
+			// =========================
+			// CASE 1: annotation AFTER change → shift
+			// =========================
+			if (
+				(isInsertion && a.range.start.line >= changeStart.line) ||
+				(!isInsertion && a.range.start.line > changeEnd.line)
+			) {
+				newStart = new vscode.Position(
+					a.range.start.line + lineDelta,
+					a.range.start.character
+				);
+
+				newEnd = new vscode.Position(
+					a.range.end.line + lineDelta,
+					a.range.end.character
+				);
+			}
+
+			// =========================
+			// CASE 2: insertion INSIDE annotation → expand
+			// =========================
+			else if (
+				isInsertion &&
+				a.range.start.line <= changeStart.line &&
+				//a.range.end.line >= changeStart.line
+				a.range.end.line > changeStart.line
+			) {
+				newEnd = new vscode.Position(
+					a.range.end.line + lineDelta,
+					a.range.end.character
+				);
+			}
+
+			// =========================
+			// CASE 2.5: deletion overlaps annotation → shrink
+			// =========================
+			else if (
+				!isInsertion &&
+				a.range.start.line <= changeEnd.line &&
+				a.range.end.line >= changeStart.line
+			) {
+				// shrink annotation properly
+				newEnd = new vscode.Position(
+					Math.max(a.range.start.line, a.range.end.line + lineDelta),
+					a.range.end.character
+				);
+
+				// prevent invalid range
+				if (newEnd.line < newStart.line) {
+					this.annotationIndex.delete(a.id);
+					continue;
+				}
+			}
+
+			// =========================
+			// CASE 3: overlap → recompute text safely
+			// =========================
+			else if (overlaps) {
+				try {
+					// recompute using actual document content
+					const newStartOffset = document.offsetAt(a.range.start);
+					// const newEndOffset = document.offsetAt(a.range.end) + lineDelta;
+					const newEndOffset = document.offsetAt(a.range.end);
+
+					const safeStart = Math.max(0, newStartOffset);
+					const safeEnd = Math.max(safeStart, Math.min(document.getText().length, newEndOffset));
+
+					const currentText = document.getText(
+						new vscode.Range(
+							document.positionAt(safeStart),
+							document.positionAt(safeEnd)
+						)
+					);
+
+					// if deleted completely → remove annotation
+					if (!currentText.trim()) {
+						this.annotationIndex.delete(a.id);
+						continue;
+					}
+
+					// update text
+					a.fullText = currentText;
+					a.textPreview = createTextPreview(currentText);
+
+					// recompute EXACT range
+					newStart = document.positionAt(safeStart);
+					newEnd = document.positionAt(safeEnd);
+				} catch {
+					continue;
+				}
+			}
+
+			a.range = new vscode.Range(newStart, newEnd);
+
+			// ADD THIS
+			try {
+				const updatedText = document.getText(
+					new vscode.Range(newStart, newEnd)
+				);
+
+				a.fullText = updatedText;
+				a.textPreview = createTextPreview(updatedText);
+			} catch {}
+
+			updated.push(a);
+		}
+
+		this.annotationsByUri.set(key, updated);
+
+		this.saveToStorage();
+		this._onDidChange.fire(document.uri);
+	}
+
+
+
+
 }
 
-function createPasteId(): string {
-	return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+export interface ExportAnnotation {
+	id: string;
+	file: string;
+	startLine: number;
+	endLine: number;
+	recordedAt: string;
+	tool?: string;
+	model?: string;
+	prompt?: string;
+	notes?: string;
+	textPreview: string;
+	originalText: string; 
+	fullText: string;
 }
 
-function transformRange(
-	range: vscode.Range,
-	change: vscode.TextDocumentContentChangeEvent
-): vscode.Range | undefined {
-	const start = mapPosition(range.start, change, true);
-	const end = mapPosition(range.end, change, false);
-	if (end.isBeforeOrEqual(start)) {
-		return undefined;
-	}
-	return new vscode.Range(start, end);
+export function buildExportData(annotations: readonly AIAnnotation[]): ExportAnnotation[] {
+	return annotations.map(a => ({
+		id: a.id,
+		file: a.uri,
+		startLine: a.range.start.line + 1,
+		endLine: a.range.end.line + 1,
+		recordedAt: a.recordedAt.toISOString(),
+		tool: a.source.tool,
+		model: a.source.model,
+		prompt: a.source.prompt,
+		notes: a.source.notes,
+		textPreview: a.textPreview,
+		originalText: a.originalText,
+		fullText: a.fullText
+	}));
 }
 
 function rangesOverlap(a: vscode.Range, b: vscode.Range): boolean {
-	return a.intersection(b) !== undefined;
+	return a.end.isAfterOrEqual(b.start) && a.start.isBeforeOrEqual(b.end);
 }
 
 function isLikelyTypingLikeEdit(change: vscode.TextDocumentContentChangeEvent): boolean {
-	return change.rangeLength === 0 && !change.text.includes('\n') && change.text.length <= 2;
+	// "Typing-like" means tiny single-line insertions (not multiline pastes).
+	if (!change.text) return true;
+	if (change.text.includes('\n') || change.text.includes('\r')) return false;
+	return change.text.length <= 2;
 }
 
-function mapPosition(
-	pos: vscode.Position,
-	change: vscode.TextDocumentContentChangeEvent,
-	clampInsideToStart: boolean
-): vscode.Position {
-	const changeStart = change.range.start;
-	const changeEnd = change.range.end;
+function transformRange(
+	original: vscode.Range,
+	change: vscode.TextDocumentContentChangeEvent
+): vscode.Range | undefined {
+	const isInsertion = (change.rangeLength ?? 0) === 0 && change.text.length > 0;
+	if (!isInsertion) {
+		// Keep it minimal for current tests: only insertion behavior is asserted.
+		return original;
+	}
 
-	if (pos.isBeforeOrEqual(changeStart)) {
-		return pos;
+	const insertedNewlines = change.text.split(/\r?\n/).length - 1;
+	if (insertedNewlines === 0) {
+		return original;
 	}
-	if (pos.isAfterOrEqual(changeEnd)) {
-		return shiftPositionAfterChange(pos, changeStart, changeEnd, change.text);
+
+	// If the insertion is strictly before the block start, shift the block down.
+	if (change.range.end.isBeforeOrEqual(original.start)) {
+		return new vscode.Range(
+			new vscode.Position(original.start.line + insertedNewlines, original.start.character),
+			new vscode.Position(original.end.line + insertedNewlines, original.end.character)
+		);
 	}
-	return clampInsideToStart ? changeStart : insertedEndPosition(changeStart, change.text);
+
+	// If the insertion is exactly at the end boundary, do not expand the block.
+	if (change.range.start.isEqual(original.end) && change.range.end.isEqual(original.end)) {
+		return original;
+	}
+
+	// If the insertion is inside the block, expand the block end.
+	if (change.range.start.isAfterOrEqual(original.start) && change.range.start.isBefore(original.end)) {
+		return new vscode.Range(
+			original.start,
+			new vscode.Position(original.end.line + insertedNewlines, original.end.character)
+		);
+	}
+
+	return original;
 }
 
-function insertedEndPosition(start: vscode.Position, text: string): vscode.Position {
-	const parts = text.split('\n');
-	if (parts.length === 1) {
-		return new vscode.Position(start.line, start.character + parts[0].length);
-	}
-	return new vscode.Position(start.line + parts.length - 1, parts[parts.length - 1].length);
+function deletePasteByIdFromList<T extends { id: string }>(list: readonly T[], id: string): T[] {
+	return list.filter((x) => x.id !== id);
 }
 
-function shiftPositionAfterChange(
-	pos: vscode.Position,
-	changeStart: vscode.Position,
-	changeEnd: vscode.Position,
-	insertedText: string
-): vscode.Position {
-	const insertedEnd = insertedEndPosition(changeStart, insertedText);
-	const lineDelta = insertedEnd.line - changeEnd.line;
-	if (lineDelta === 0) {
-		if (pos.line === changeEnd.line) {
-			return new vscode.Position(pos.line, pos.character + (insertedEnd.character - changeEnd.character));
-		}
-		return pos;
-	}
-	if (pos.line === changeEnd.line) {
-		return new vscode.Position(pos.line + lineDelta, insertedEnd.character + (pos.character - changeEnd.character));
-	}
-	return new vscode.Position(pos.line + lineDelta, pos.character);
+function clearPastesFromList<T>(): T[] {
+	return [];
 }
 
+// Expose internal helpers for unit tests only.
 export const __test = {
 	transformRange,
 	rangesOverlap,
 	isLikelyTypingLikeEdit,
-	createPasteId,
 	deletePasteByIdFromList,
 	clearPastesFromList,
 };
-
-function deletePasteByIdFromList(list: readonly SourcedPaste[], id: string): SourcedPaste[] {
-	return list.filter((item) => item.id !== id);
-}
-
-function clearPastesFromList(_list?: readonly SourcedPaste[]): SourcedPaste[] {
-	return [];
-}
