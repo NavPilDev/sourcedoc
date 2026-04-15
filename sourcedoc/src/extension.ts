@@ -460,7 +460,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const markers = new SourceMarkers(model);
 	context.subscriptions.push(markers);
 
-	const webviewProvider = new SourceWebviewViewProvider(context.extensionUri, model);
+	const webviewProvider = new SourceWebviewViewProvider(context.extensionUri, model, context, markers);
 	context.subscriptions.push(webviewProvider);
 
 	context.subscriptions.push(
@@ -496,6 +496,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.workspace.onDidChangeTextDocument(async (event) => {
 			const editor = vscode.window.activeTextEditor;
 			if (!editor || event.document !== editor.document) return;
+
+			const autoDetectEnabled = context.workspaceState.get<boolean>(
+				'sourcedoc.settings.autoAnnotationDetection',
+				true
+			);
+			if (!autoDetectEnabled) {
+				return;
+			}
 
 			for (const change of event.contentChanges) {
 				if (!detectPaste(change)) continue;

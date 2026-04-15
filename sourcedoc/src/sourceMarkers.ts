@@ -58,6 +58,8 @@ export class SourceMarkers implements vscode.Disposable {
 	private readonly aiDecoration: vscode.TextEditorDecorationType;
 	private readonly model: SourcePasteModel;
 	private readonly modelListener: vscode.Disposable;
+	private autoHide = false;
+	private revealByUri = new Map<string, { range: vscode.Range; timeout: NodeJS.Timeout }>();
 
 	constructor(model: SourcePasteModel) {
 		this.model = model;
@@ -77,15 +79,53 @@ export class SourceMarkers implements vscode.Disposable {
 	dispose(): void {
 		this.modelListener.dispose();
 		this.aiDecoration.dispose();
+		for (const entry of this.revealByUri.values()) {
+			clearTimeout(entry.timeout);
+		}
+		this.revealByUri.clear();
+	}
+
+	setAutoHide(enabled: boolean): void {
+		this.autoHide = enabled;
+		this.refreshAllVisibleEditors();
+	}
+
+	revealOnce(uri: vscode.Uri, range: vscode.Range, ms = 1200): void {
+		const key = uri.toString();
+		const prev = this.revealByUri.get(key);
+		if (prev) {
+			clearTimeout(prev.timeout);
+		}
+
+		const timeout = setTimeout(() => {
+			this.revealByUri.delete(key);
+			this.refreshEditorsForDocument(uri);
+		}, ms);
+
+		this.revealByUri.set(key, { range, timeout });
+		this.refreshEditorsForDocument(uri);
 	}
 
 	refreshEditor(editor: vscode.TextEditor): void {
 		const annotations = this.model.getAnnotations(editor.document.uri);
 
-		const options: vscode.DecorationOptions[] = annotations.map((annotation) => ({
-			range: annotation.range,
-			hoverMessage: buildHoverMessage(annotation),
-		}));
+		let options: vscode.DecorationOptions[] = [];
+		if (!this.autoHide) {
+			options = annotations.map((annotation) => ({
+				range: annotation.range,
+				hoverMessage: buildHoverMessage(annotation),
+			}));
+		} else {
+			const revealed = this.revealByUri.get(editor.document.uri.toString());
+			if (revealed) {
+				options = [
+					{
+						range: revealed.range,
+						hoverMessage: new vscode.MarkdownString('SourceDoc: marker revealed for navigation.', true),
+					},
+				];
+			}
+		}
 
 		editor.setDecorations(this.aiDecoration, options);
 	}

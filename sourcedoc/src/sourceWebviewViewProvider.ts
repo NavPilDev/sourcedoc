@@ -9,7 +9,12 @@ import {
 	ExportAnnotation
 } from './sourcePasteModel';
 
-type ViewMode = 'annotations' | 'stats' | 'export';
+type ViewMode = 'annotations' | 'stats' | 'export' | 'settings';
+
+interface WebviewSettingsState {
+	autoHideMarkers: boolean;
+	autoAnnotationDetection: boolean;
+}
 
 interface WebviewRecordRow {
 	id: string;
@@ -34,6 +39,7 @@ interface WebviewUpdateMessage {
 
 	// 🔥 NEW
 	exportData?: ExportAnnotation[];
+	settings?: WebviewSettingsState;
 }
 
 function fileLabelForUri(uri: vscode.Uri): string {
@@ -118,6 +124,11 @@ function buildHtml(nonce: string, cspSource: string): string {
 			grid-template-columns: repeat(2, 1fr);
 			gap: 6px;
 			margin: 10px 0 12px;
+		}
+		@media (min-width: 320px) {
+			.tabs {
+				grid-template-columns: repeat(4, 1fr);
+			}
 		}
 		.tab {
 			border: 1px solid var(--vscode-button-border, rgba(127,127,127,0.3));
@@ -237,6 +248,75 @@ function buildHtml(nonce: string, cspSource: string): string {
 			border-left: 2px solid rgba(127,127,127,0.35);
 			padding-left: 8px;
 		}
+		.settings {
+			display: grid;
+			gap: 10px;
+		}
+		.setting {
+			border: 1px solid var(--vscode-widget-border, rgba(127,127,127,0.25));
+			border-radius: 10px;
+			padding: 10px;
+			background: var(--vscode-editorWidget-background, rgba(127,127,127,0.08));
+		}
+		.setting-top {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 10px;
+		}
+		.setting-title {
+			font-weight: 700;
+		}
+		.setting-desc {
+			opacity: 0.85;
+			margin-top: 6px;
+			line-height: 1.4;
+			font-size: 0.9em;
+		}
+		.switch {
+			position: relative;
+			width: 42px;
+			height: 24px;
+			display: inline-block;
+			flex: 0 0 auto;
+		}
+		.switch input {
+			opacity: 0;
+			width: 0;
+			height: 0;
+		}
+		.slider {
+			position: absolute;
+			cursor: pointer;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background: rgba(127,127,127,0.35);
+			transition: 0.15s;
+			border-radius: 999px;
+			border: 1px solid rgba(127,127,127,0.25);
+		}
+		.slider:before {
+			position: absolute;
+			content: '';
+			height: 18px;
+			width: 18px;
+			left: 2px;
+			top: 2px;
+			background: var(--vscode-foreground);
+			transition: 0.15s;
+			border-radius: 999px;
+			opacity: 0.85;
+		}
+		input:checked + .slider {
+			background: var(--vscode-button-background);
+		}
+		input:checked + .slider:before {
+			transform: translateX(18px);
+			background: var(--vscode-button-foreground);
+			opacity: 1;
+		}
 		.flags {
 			display: flex;
 			gap: 6px;
@@ -298,6 +378,7 @@ function buildHtml(nonce: string, cspSource: string): string {
 		<button class="tab" id="tab-annotations" data-view="annotations">Annotations</button>
 		<button class="tab" id="tab-stats" data-view="stats">Stats</button>
 		<button class="tab" id="tab-export" data-view="export">Export</button>
+		<button class="tab" id="tab-settings" data-view="settings">Settings</button>
 	</div>
 
 	<div id="content"></div>
@@ -602,6 +683,8 @@ function buildHtml(nonce: string, cspSource: string): string {
 				renderStats(msg.stats);
 			} else if (msg.view === 'export') {
 				renderExport(msg.exportData);
+			} else if (msg.view === 'settings') {
+				renderSettings(msg.settings || {});
 			} else {
 				renderRecords(msg.records || []);
 			}
@@ -648,6 +731,54 @@ function buildHtml(nonce: string, cspSource: string): string {
 			contentEl.replaceChildren(wrapper);
 		}
 
+		function renderSettings(settings) {
+			const wrapper = document.createElement('div');
+			wrapper.className = 'settings';
+
+			const autoHide = document.createElement('div');
+			autoHide.className = 'setting';
+			autoHide.innerHTML =
+				'<div class="setting-top">' +
+				'<div class="setting-title">Auto Hide Markers</div>' +
+				'<label class="switch">' +
+				'<input type="checkbox" id="autoHideMarkers">' +
+				'<span class="slider"></span>' +
+				'</label>' +
+				'</div>' +
+				'<div class="setting-desc">Hide editor markers by default. Markers will briefly reveal only for the selected code block when you click “Go to code”.</div>';
+
+			const autoDetect = document.createElement('div');
+			autoDetect.className = 'setting';
+			autoDetect.innerHTML =
+				'<div class="setting-top">' +
+				'<div class="setting-title">Automatic Annotation Detection</div>' +
+				'<label class="switch">' +
+				'<input type="checkbox" id="autoAnnotationDetection">' +
+				'<span class="slider"></span>' +
+				'</label>' +
+				'</div>' +
+				'<div class="setting-desc">When off, SourceDoc won’t pop up the annotation modal automatically on paste. Use “Annotate Selected Code” to annotate manually.</div>';
+
+			wrapper.appendChild(autoHide);
+			wrapper.appendChild(autoDetect);
+			contentEl.replaceChildren(wrapper);
+
+			const hideEl = document.getElementById('autoHideMarkers');
+			const detectEl = document.getElementById('autoAnnotationDetection');
+			if (hideEl) {
+				hideEl.checked = !!settings?.autoHideMarkers;
+				hideEl.addEventListener('change', () => {
+					vscode.postMessage({ type: 'setSetting', key: 'autoHideMarkers', value: !!hideEl.checked });
+				});
+			}
+			if (detectEl) {
+				detectEl.checked = settings?.autoAnnotationDetection !== false;
+				detectEl.addEventListener('change', () => {
+					vscode.postMessage({ type: 'setSetting', key: 'autoAnnotationDetection', value: !!detectEl.checked });
+				});
+			}
+		}
+
 
 	</script>
 </body>
@@ -658,10 +789,16 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 	private webviewView?: vscode.WebviewView;
 	private currentView: ViewMode = 'annotations';
 	private readonly disposables: vscode.Disposable[] = [];
+	private settings: WebviewSettingsState = { autoHideMarkers: false, autoAnnotationDetection: true };
+
+	private static readonly SETTINGS_AUTO_HIDE = 'sourcedoc.settings.autoHideMarkers';
+	private static readonly SETTINGS_AUTO_DETECT = 'sourcedoc.settings.autoAnnotationDetection';
 
 	constructor(
 		private readonly extensionUri: vscode.Uri,
-		private readonly model: SourcePasteModel
+		private readonly model: SourcePasteModel,
+		private readonly context: vscode.ExtensionContext,
+		private readonly markers: import('./sourceMarkers').SourceMarkers
 	) {}
 
 	dispose(): void {
@@ -716,7 +853,8 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 				stats: this.model.getStats(uri),
 
 				// 🔥 ADD THIS
-				exportData
+				exportData,
+				settings: this.settings,
 			};
 
 			void webview.postMessage(message);
@@ -736,8 +874,23 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 				}
 
 				if (msg.type === 'setView') {
-					if (msg.view === 'annotations' || msg.view === 'stats' || msg.view === 'export') {
+					if (msg.view === 'annotations' || msg.view === 'stats' || msg.view === 'export' || msg.view === 'settings') {
 						this.currentView = msg.view;
+						postUpdate();
+					}
+					return;
+				}
+
+				if (msg.type === 'setSetting' && typeof msg.key === 'string') {
+					const value = !!msg.value;
+					if (msg.key === 'autoHideMarkers') {
+						this.settings.autoHideMarkers = value;
+						await this.context.workspaceState.update(SourceWebviewViewProvider.SETTINGS_AUTO_HIDE, value);
+						this.markers.setAutoHide(value);
+						postUpdate();
+					} else if (msg.key === 'autoAnnotationDetection') {
+						this.settings.autoAnnotationDetection = value;
+						await this.context.workspaceState.update(SourceWebviewViewProvider.SETTINGS_AUTO_DETECT, value);
 						postUpdate();
 					}
 					return;
@@ -779,6 +932,10 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 
 					editor.selection = new vscode.Selection(start, end);
 					editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+
+					if (this.settings.autoHideMarkers) {
+						this.markers.revealOnce(editor.document.uri, range);
+					}
 				}
 			})
 		);
@@ -786,6 +943,13 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 		webviewView.onDidDispose(() => {
 			this.webviewView = undefined;
 		});
+
+		// initialize settings from workspace state before first render
+		this.settings = {
+			autoHideMarkers: this.context.workspaceState.get<boolean>(SourceWebviewViewProvider.SETTINGS_AUTO_HIDE, false),
+			autoAnnotationDetection: this.context.workspaceState.get<boolean>(SourceWebviewViewProvider.SETTINGS_AUTO_DETECT, true),
+		};
+		this.markers.setAutoHide(this.settings.autoHideMarkers);
 
 		postUpdate();
 	}
