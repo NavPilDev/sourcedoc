@@ -41,6 +41,7 @@ export interface TrackerStats {
 	totalAnnotations: number;
 	annotatedLines: number;
 	toolsBreakdown: Array<{ label: string; value: number }>;
+	modelsBreakdown: Array<{ label: string; value: number }>;
 	avgEditRatio?: number;
 }
 
@@ -341,6 +342,16 @@ export class SourcePasteModel implements vscode.Disposable {
 			.map(([label, value]) => ({ label, value }))
 			.sort((a, b) => b.value - a.value);
 
+		const modelCounts = new Map<string, number>();
+		for (const item of annotations) {
+			const label = item.source.model?.trim() || 'No model';
+			modelCounts.set(label, (modelCounts.get(label) ?? 0) + 1);
+		}
+
+		const modelsBreakdown = [...modelCounts.entries()]
+			.map(([label, value]) => ({ label, value }))
+			.sort((a, b) => b.value - a.value);
+
 		let totalEditRatio = 0;
 		let count = 0;
 
@@ -358,6 +369,7 @@ export class SourcePasteModel implements vscode.Disposable {
 			totalAnnotations,
 			annotatedLines,
 			toolsBreakdown,
+			modelsBreakdown,
 			avgEditRatio
 		};
 	}

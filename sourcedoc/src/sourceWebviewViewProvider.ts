@@ -40,6 +40,7 @@ interface WebviewUpdateMessage {
 	// 🔥 NEW
 	exportData?: ExportAnnotation[];
 	settings?: WebviewSettingsState;
+	exportChartPrefs?: { tools: 'bar' | 'pie' | 'donut'; models: 'bar' | 'pie' | 'donut' };
 }
 
 function fileLabelForUri(uri: vscode.Uri): string {
@@ -606,6 +607,146 @@ function buildHtml(nonce: string, cspSource: string): string {
 			const wrapper = document.createElement('div');
 			wrapper.className = 'stats';
 
+			function getChartPrefs() {
+				return (window.__exportChartPrefs || { tools: 'donut', models: 'donut' });
+			}
+
+			function setChartPref(target, value) {
+				window.__exportChartPrefs = window.__exportChartPrefs || { tools: 'donut', models: 'donut' };
+				window.__exportChartPrefs[target] = value;
+				vscode.postMessage({ type: 'setExportChart', target, value });
+			}
+
+			function palette(i) {
+				const colors = [
+					'#78dcaa',
+					'#96c8ff',
+					'#bea0ff',
+					'#ffb478',
+					'#ffdc78',
+					'#ff9678',
+					'#d2d2dc',
+					'#96ebaa',
+					'#a0a0aa',
+				];
+				return colors[i % colors.length];
+			}
+
+			function renderBarChart(data) {
+				const max = Math.max(...data.map((d) => d.value), 1);
+				const rows = data.slice(0, 8).map((d, idx) => {
+					const w = Math.round((d.value / max) * 180);
+					return (
+						'<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">' +
+						'<div style="flex:0 0 92px;opacity:0.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
+						String(d.label).replace(/</g, '&lt;') +
+						'</div>' +
+						'<div style="flex:0 0 180px;height:10px;border-radius:999px;background:rgba(127,127,127,0.25);overflow:hidden;">' +
+						'<div style="height:10px;width:' + w + 'px;background:' + palette(idx) + ';"></div>' +
+						'</div>' +
+						'<strong style="flex:0 0 auto;opacity:0.9;">' +
+						d.value +
+						'</strong>' +
+						'</div>'
+					);
+				});
+				return '<div style="margin-top:8px;">' + rows.join('') + '</div>';
+			}
+
+			function arcPath(cx, cy, rOuter, rInner, a0, a1) {
+				const large = a1 - a0 > Math.PI ? 1 : 0;
+				const x0 = cx + Math.cos(a0) * rOuter;
+				const y0 = cy + Math.sin(a0) * rOuter;
+				const x1 = cx + Math.cos(a1) * rOuter;
+				const y1 = cy + Math.sin(a1) * rOuter;
+				const x2 = cx + Math.cos(a1) * rInner;
+				const y2 = cy + Math.sin(a1) * rInner;
+				const x3 = cx + Math.cos(a0) * rInner;
+				const y3 = cy + Math.sin(a0) * rInner;
+				return (
+					'M ' +
+					x0 +
+					' ' +
+					y0 +
+					' A ' +
+					rOuter +
+					' ' +
+					rOuter +
+					' 0 ' +
+					large +
+					' 1 ' +
+					x1 +
+					' ' +
+					y1 +
+					' L ' +
+					x2 +
+					' ' +
+					y2 +
+					' A ' +
+					rInner +
+					' ' +
+					rInner +
+					' 0 ' +
+					large +
+					' 0 ' +
+					x3 +
+					' ' +
+					y3 +
+					' Z'
+				);
+			}
+
+			function renderPieLike(data, donut) {
+				const total = data.reduce((s, d) => s + d.value, 0) || 1;
+				let angle = -Math.PI / 2;
+				const cx = 70;
+				const cy = 70;
+				const rOuter = 60;
+				const rInner = donut ? 34 : 0.001;
+				const paths = [];
+				data.slice(0, 8).forEach((d, idx) => {
+					const slice = (d.value / total) * Math.PI * 2;
+					const a0 = angle;
+					const a1 = angle + slice;
+					angle = a1;
+					paths.push(
+						'<path d="' +
+							arcPath(cx, cy, rOuter, rInner, a0, a1) +
+							'" fill="' +
+							palette(idx) +
+							'" opacity="0.95" />'
+					);
+				});
+
+				const legend = data.slice(0, 8).map((d, idx) => {
+					return (
+						'<div style="display:flex;align-items:center;gap:6px;margin:3px 0;">' +
+						'<span style="width:10px;height:10px;border-radius:2px;background:' +
+						palette(idx) +
+						';display:inline-block;"></span>' +
+						'<span style="opacity:0.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;">' +
+						String(d.label).replace(/</g, '&lt;') +
+						'</span>' +
+						'<strong style="opacity:0.9;margin-left:auto;">' +
+						d.value +
+						'</strong>' +
+						'</div>'
+					);
+				});
+
+				return (
+					'<div style="display:flex;gap:10px;align-items:flex-start;margin-top:8px;">' +
+					'<svg width="140" height="140" viewBox="0 0 140 140">' +
+					paths.join('') +
+					(donut ? '<circle cx="70" cy="70" r="28" fill="rgba(45,42,46,1)"></circle>' : '') +
+					'</svg>' +
+					'<div style="flex:1;min-width:0;">' +
+					legend.join('') +
+					'</div>' +
+					'</div>'
+				);
+			}
+
 			const summaryCard = document.createElement('div');
 			summaryCard.className = 'stat-card';
 
@@ -635,29 +776,79 @@ function buildHtml(nonce: string, cspSource: string): string {
 
 			wrapper.appendChild(summaryCard);
 
-			const toolsCard = document.createElement('div');
-			toolsCard.className = 'stat-card';
+			function buildBreakdownCard(titleText, items, prefTarget) {
+				const card = document.createElement('div');
+				card.className = 'stat-card';
 
-			const toolsTitle = document.createElement('div');
-			toolsTitle.className = 'stat-title';
-			toolsTitle.textContent = 'Tools';
+				const title = document.createElement('div');
+				title.className = 'stat-title';
+				title.textContent = titleText;
 
-			if (stats.toolsBreakdown && stats.toolsBreakdown.length > 0) {
-				for (const item of stats.toolsBreakdown) {
-					const row = document.createElement('div');
-					row.className = 'stat-row';
-					row.innerHTML = '<span>' + item.label + '</span><strong>' + item.value + '</strong>';
-					toolsCard.appendChild(row);
+				const top = document.createElement('div');
+				top.style.display = 'flex';
+				top.style.alignItems = 'center';
+				top.style.justifyContent = 'space-between';
+				top.style.gap = '8px';
+
+				const select = document.createElement('select');
+				select.style.maxWidth = '140px';
+				select.innerHTML =
+					'<option value="bar">Bar</option>' +
+					'<option value="pie">Pie</option>' +
+					'<option value="donut">Donut</option>';
+
+				const prefs = getChartPrefs();
+				select.value = prefs[prefTarget] || 'donut';
+				select.addEventListener('change', () => {
+					setChartPref(prefTarget, select.value);
+				});
+
+				top.appendChild(title);
+				top.appendChild(select);
+
+				card.appendChild(top);
+
+				const chartContainer = document.createElement('div');
+				chartContainer.style.marginTop = '6px';
+
+				const rowsContainer = document.createElement('div');
+				rowsContainer.style.marginTop = '8px';
+
+				function refresh() {
+					const mode = (getChartPrefs()[prefTarget] || 'donut');
+					if (!items || items.length === 0) {
+						chartContainer.innerHTML = '<div class="empty">No data yet.</div>';
+						rowsContainer.innerHTML = '';
+						return;
+					}
+					if (mode === 'bar') {
+						chartContainer.innerHTML = renderBarChart(items);
+					} else if (mode === 'pie') {
+						chartContainer.innerHTML = renderPieLike(items, false);
+					} else {
+						chartContainer.innerHTML = renderPieLike(items, true);
+					}
+
+					rowsContainer.innerHTML = '';
+					for (const item of items) {
+						const row = document.createElement('div');
+						row.className = 'stat-row';
+						row.innerHTML = '<span>' + item.label + '</span><strong>' + item.value + '</strong>';
+						rowsContainer.appendChild(row);
+					}
 				}
-			} else {
-				const empty = document.createElement('div');
-				empty.className = 'empty';
-				empty.textContent = 'No tool data yet.';
-				toolsCard.appendChild(empty);
+
+				refresh();
+				card.appendChild(chartContainer);
+				card.appendChild(rowsContainer);
+
+				// keep in sync with updates
+				select.addEventListener('change', refresh);
+				return card;
 			}
 
-			toolsCard.prepend(toolsTitle);
-			wrapper.appendChild(toolsCard);
+			wrapper.appendChild(buildBreakdownCard('Tools', stats.toolsBreakdown || [], 'tools'));
+			wrapper.appendChild(buildBreakdownCard('Models', stats.modelsBreakdown || [], 'models'));
 
 			contentEl.replaceChildren(wrapper);
 		}
@@ -674,6 +865,11 @@ function buildHtml(nonce: string, cspSource: string): string {
 			const msg = event.data;
 			if (!msg || msg.type !== 'update') {
 				return;
+			}
+
+			// cache export chart prefs so Stats dropdowns render consistently
+			if (msg.exportChartPrefs) {
+				window.__exportChartPrefs = msg.exportChartPrefs;
 			}
 
 			fileEl.textContent = '';
@@ -694,39 +890,24 @@ function buildHtml(nonce: string, cspSource: string): string {
 
 
 		function renderExport(data) {
-			if (!data || data.length === 0) {
-				contentEl.textContent = 'No data to export.';
-				return;
-			}
-
 			const wrapper = document.createElement('div');
 
 			const btn = document.createElement('button');
-			btn.textContent = 'Download JSON';
+			btn.textContent = 'Export PDF';
 			btn.style.padding = '8px';
 			btn.style.marginBottom = '10px';
 
 			btn.onclick = () => {
-				const blob = new Blob(
-					[JSON.stringify(data, null, 2)],
-					{ type: 'application/json' }
-				);
-
-				const url = URL.createObjectURL(blob);
-
-				const a = document.createElement('a');
-				a.href = url;
-				a.download = 'vibe-tracker-export.json';
-				a.click();
+				vscode.postMessage({ type: 'exportPdf' });
 			};
 
 			wrapper.appendChild(btn);
 
-			const preview = document.createElement('pre');
-			preview.style.fontSize = '11px';
-			preview.textContent = JSON.stringify(data.slice(0, 5), null, 2);
-
-			wrapper.appendChild(preview);
+			const hint = document.createElement('div');
+			hint.className = 'empty';
+			hint.textContent =
+				'Exports a PDF for the active file, including the last-selected Tools/Models chart types from Stats.';
+			wrapper.appendChild(hint);
 
 			contentEl.replaceChildren(wrapper);
 		}
@@ -790,9 +971,15 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 	private currentView: ViewMode = 'annotations';
 	private readonly disposables: vscode.Disposable[] = [];
 	private settings: WebviewSettingsState = { autoHideMarkers: false, autoAnnotationDetection: true };
+	private exportChartPrefs: { tools: 'bar' | 'pie' | 'donut'; models: 'bar' | 'pie' | 'donut' } = {
+		tools: 'donut',
+		models: 'donut',
+	};
 
 	private static readonly SETTINGS_AUTO_HIDE = 'sourcedoc.settings.autoHideMarkers';
 	private static readonly SETTINGS_AUTO_DETECT = 'sourcedoc.settings.autoAnnotationDetection';
+	private static readonly EXPORT_CHART_TOOLS = 'sourcedoc.export.chart.tools';
+	private static readonly EXPORT_CHART_MODELS = 'sourcedoc.export.chart.models';
 
 	constructor(
 		private readonly extensionUri: vscode.Uri,
@@ -855,6 +1042,7 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 				// 🔥 ADD THIS
 				exportData,
 				settings: this.settings,
+				exportChartPrefs: this.exportChartPrefs,
 			};
 
 			void webview.postMessage(message);
@@ -891,6 +1079,21 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 					} else if (msg.key === 'autoAnnotationDetection') {
 						this.settings.autoAnnotationDetection = value;
 						await this.context.workspaceState.update(SourceWebviewViewProvider.SETTINGS_AUTO_DETECT, value);
+						postUpdate();
+					}
+					return;
+				}
+
+				if (msg.type === 'setExportChart' && typeof msg.target === 'string' && typeof msg.value === 'string') {
+					const v = msg.value === 'bar' || msg.value === 'pie' || msg.value === 'donut' ? msg.value : undefined;
+					if (!v) return;
+					if (msg.target === 'tools') {
+						this.exportChartPrefs.tools = v;
+						await this.context.workspaceState.update(SourceWebviewViewProvider.EXPORT_CHART_TOOLS, v);
+						postUpdate();
+					} else if (msg.target === 'models') {
+						this.exportChartPrefs.models = v;
+						await this.context.workspaceState.update(SourceWebviewViewProvider.EXPORT_CHART_MODELS, v);
 						postUpdate();
 					}
 					return;
@@ -936,6 +1139,12 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 					if (this.settings.autoHideMarkers) {
 						this.markers.revealOnce(editor.document.uri, range);
 					}
+					return;
+				}
+
+				if (msg.type === 'exportPdf') {
+					await vscode.commands.executeCommand('sourcedoc.exportPdf');
+					return;
 				}
 			})
 		);
@@ -948,6 +1157,10 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 		this.settings = {
 			autoHideMarkers: this.context.workspaceState.get<boolean>(SourceWebviewViewProvider.SETTINGS_AUTO_HIDE, false),
 			autoAnnotationDetection: this.context.workspaceState.get<boolean>(SourceWebviewViewProvider.SETTINGS_AUTO_DETECT, true),
+		};
+		this.exportChartPrefs = {
+			tools: this.context.workspaceState.get<'bar' | 'pie' | 'donut'>(SourceWebviewViewProvider.EXPORT_CHART_TOOLS, 'donut'),
+			models: this.context.workspaceState.get<'bar' | 'pie' | 'donut'>(SourceWebviewViewProvider.EXPORT_CHART_MODELS, 'donut'),
 		};
 		this.markers.setAutoHide(this.settings.autoHideMarkers);
 

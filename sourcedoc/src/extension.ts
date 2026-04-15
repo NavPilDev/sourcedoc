@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { SourcePasteModel, SourceMetadata } from './sourcePasteModel';
 import { SourceMarkers } from './sourceMarkers';
 import { SourceWebviewViewProvider } from './sourceWebviewViewProvider';
+import PDFDocument from 'pdfkit';
+import * as fs from 'node:fs';
 
 // =========================
 // PASTE DETECTION
@@ -587,6 +589,145 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (!annotationId) return;
 
 			model.deleteAnnotation(annotationId);
+		})
+	);
+
+	// =========================
+	// EXPORT PDF
+	// =========================
+	context.subscriptions.push(
+		vscode.commands.registerCommand('sourcedoc.exportPdf', async () => {
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) {
+				vscode.window.showWarningMessage('No active editor to export.');
+				return;
+			}
+
+			const uri = editor.document.uri;
+			const annotations = model.getAnnotations(uri);
+			const stats = model.getStats(uri);
+
+			const toolsChart = context.workspaceState.get<'bar' | 'pie' | 'donut'>('sourcedoc.export.chart.tools', 'donut');
+			const modelsChart = context.workspaceState.get<'bar' | 'pie' | 'donut'>('sourcedoc.export.chart.models', 'donut');
+
+			const fileLabel = vscode.workspace.asRelativePath(uri);
+			const defaultName = (fileLabel.split(/[\\/]/).pop() || 'sourcedoc') + '.pdf';
+
+			const saveUri = await vscode.window.showSaveDialog({
+				defaultUri: vscode.Uri.file(defaultName),
+				filters: { PDF: ['pdf'] },
+				saveLabel: 'Export PDF',
+			});
+			if (!saveUri) return;
+
+			try {
+				await vscode.window.withProgress(
+					{ location: vscode.ProgressLocation.Notification, title: 'SourceDoc: exporting PDF…' },
+					async () => {
+						const doc = new PDFDocument({ size: 'LETTER', margin: 48 });
+						const out = fs.createWriteStream(saveUri.fsPath);
+
+						const completed = new Promise<void>((resolve, reject) => {
+							let settled = false;
+							const done = (err?: unknown) => {
+								if (settled) return;
+								settled = true;
+								err ? reject(err) : resolve();
+							};
+
+							out.on('close', () => done());
+							out.on('finish', () => done()); // fallback
+							out.on('error', (e) => done(e));
+							doc.on('error', (e) => done(e));
+						});
+
+						doc.pipe(out);
+
+						doc.fontSize(18).text('SourceDoc Export');
+						doc.moveDown(0.4);
+						doc.fontSize(12).fillColor('#444444').text('File: ' + fileLabel);
+						doc.fillColor('#000000');
+						doc.moveDown(1);
+
+						// File Stats
+						doc.fontSize(14).text('File Stats');
+						doc.moveDown(0.3);
+						doc.fontSize(11).fillColor('#444444').text(`Charts: Tools=${toolsChart}, Models=${modelsChart}`);
+						doc.fillColor('#000000');
+						doc.moveDown(0.5);
+
+						doc.fontSize(11).text(`Total annotations: ${stats.totalAnnotations}`);
+						doc.fontSize(11).text(`Annotated lines: ${stats.annotatedLines}`);
+						doc.fontSize(11).text(`Avg edit ratio: ${((stats.avgEditRatio ?? 0) * 100).toFixed(1)}%`);
+						doc.moveDown(0.6);
+
+						doc.fontSize(12).text('Tools');
+						for (const row of stats.toolsBreakdown) {
+							doc.fontSize(10).text(`- ${row.label}: ${row.value}`);
+						}
+						doc.moveDown(0.4);
+
+						doc.fontSize(12).text('Models');
+						for (const row of stats.modelsBreakdown) {
+							doc.fontSize(10).text(`- ${row.label}: ${row.value}`);
+						}
+						doc.moveDown(1);
+
+						// Tracked blocks
+						doc.fontSize(14).text('Tracked Code Blocks');
+						doc.moveDown(0.5);
+
+						for (const a of annotations) {
+							const header = `${a.source.tool || 'Unspecified tool'} • ${a.source.model || 'No model'}`;
+							doc.fontSize(11).fillColor('#000000').text(header);
+							doc.fontSize(10).fillColor('#444444').text(
+								`Lines ${a.range.start.line + 1}–${a.range.end.line + 1} • ${a.recordedAt.toISOString()}`
+							);
+							doc.fillColor('#000000');
+							doc.moveDown(0.2);
+
+							// Preview code block (Monokai-ish)
+							const previewText = a.textPreview || '(No preview available)';
+							const boxLeft = doc.x;
+							const boxWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+							const boxTop = doc.y + 4;
+							const boxHeight = 58;
+							doc.save();
+							doc.rect(boxLeft, boxTop, boxWidth, boxHeight).fill('#2d2a2e');
+							doc.restore();
+							doc.fillColor('#fcfcfa').font('Courier').fontSize(9);
+							doc.text(previewText, boxLeft + 10, boxTop + 10, { width: boxWidth - 20, height: boxHeight - 20 });
+							doc.fillColor('#000000').font('Helvetica').fontSize(11);
+							doc.y = boxTop + boxHeight + 6;
+
+							if (a.source.prompt) {
+								doc.fontSize(10).fillColor('#444444').text('Prompt:');
+								doc.fillColor('#000000').fontSize(10).text(a.source.prompt);
+								doc.moveDown(0.2);
+							}
+							if (a.source.notes) {
+								doc.fontSize(10).fillColor('#444444').text('Notes:');
+								doc.fillColor('#000000').fontSize(10).text(a.source.notes);
+								doc.moveDown(0.2);
+							}
+
+							doc.moveDown(0.8);
+							if (doc.y > doc.page.height - 120) {
+								doc.addPage();
+							}
+						}
+
+						doc.end();
+						await completed;
+					}
+				);
+			} catch (e) {
+				const message = e instanceof Error ? e.message : String(e);
+				vscode.window.showErrorMessage('SourceDoc: PDF export failed: ' + message);
+				return;
+			}
+
+			vscode.window.showInformationMessage('SourceDoc: PDF exported.');
 		})
 	);
 

@@ -17,6 +17,7 @@
     "onCommand:sourcedoc.annotateExisting",
     "onCommand:sourcedoc.deleteAnnotation",
     "onCommand:sourcedoc.clearAnnotationsInFile",
+    "onCommand:sourcedoc.exportPdf",
     "onView:sourcedoc.sourcePanel"
   ],
   "main": "./dist/extension.js",
@@ -44,7 +45,7 @@
         "command": "sourcedoc.source",
         "category": "SourceDoc",
         "title": "Source from SourceDoc"
-      }, 
+      },
       {
         "command": "sourcedoc.generate",
         "category": "SourceDoc",
@@ -69,6 +70,11 @@
         "command": "sourcedoc.clearAnnotationsInFile",
         "category": "SourceDoc",
         "title": "Clear AI Metadata in Current File"
+      },
+      {
+        "command": "sourcedoc.exportPdf",
+        "category": "SourceDoc",
+        "title": "Export SourceDoc PDF (Current File)"
       }
     ],
     "menus": {
@@ -80,10 +86,21 @@
         }
       ],
       "commandPalette": [
-        { "command": "sourcedoc.annotateSelection" },
-        { "command": "sourcedoc.annotateExisting" },
-        { "command": "sourcedoc.deleteAnnotation" },
-        { "command": "sourcedoc.clearAnnotationsInFile" }
+        {
+          "command": "sourcedoc.annotateSelection"
+        },
+        {
+          "command": "sourcedoc.annotateExisting"
+        },
+        {
+          "command": "sourcedoc.deleteAnnotation"
+        },
+        {
+          "command": "sourcedoc.clearAnnotationsInFile"
+        },
+        {
+          "command": "sourcedoc.exportPdf"
+        }
       ]
     }
   },
@@ -99,16 +116,20 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.110.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "typescript-eslint": "^8.56.1",
-    "eslint": "^9.39.3",
-    "typescript": "^5.9.3",
-    "ts-loader": "^9.5.4",
-    "webpack": "^5.105.3",
-    "webpack-cli": "^6.0.1",
+    "@types/pdfkit": "^0.17.5",
+    "@types/vscode": "^1.110.0",
     "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.39.3",
+    "ts-loader": "^9.5.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1",
+    "webpack": "^5.105.3",
+    "webpack-cli": "^6.0.1"
+  },
+  "dependencies": {
+    "pdfkit": "^0.18.0"
   }
 }
