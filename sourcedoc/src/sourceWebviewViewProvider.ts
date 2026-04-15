@@ -169,6 +169,34 @@ function buildHtml(nonce: string, cspSource: string): string {
 			opacity: 0.88;
 			margin-bottom: 6px;
 		}
+		.tool-token,
+		.model-token {
+			font-weight: 600;
+		}
+		.token-unknown {
+			color: rgba(150, 200, 255, 0.95);
+		}
+		/* Tool palette */
+		.tool-chatgpt { color: rgba(120, 220, 170, 0.98); }
+		.tool-cursor { color: rgba(150, 200, 255, 0.98); }
+		.tool-copilot { color: rgba(190, 160, 255, 0.98); }
+		.tool-claude { color: rgba(255, 180, 120, 0.98); }
+		.tool-gemini { color: rgba(255, 220, 120, 0.98); }
+		.tool-stack-overflow { color: rgba(255, 150, 120, 0.98); }
+		.tool-github { color: rgba(210, 210, 220, 0.98); }
+		.tool-geeksforgeeks { color: rgba(150, 235, 170, 0.98); }
+		.tool-other { color: rgba(160, 160, 170, 0.98); }
+
+		/* Model colors: same family as tool, slightly different shade */
+		.model-tool-chatgpt { color: rgba(120, 220, 170, 0.78); }
+		.model-tool-cursor { color: rgba(150, 200, 255, 0.78); }
+		.model-tool-copilot { color: rgba(190, 160, 255, 0.78); }
+		.model-tool-claude { color: rgba(255, 180, 120, 0.78); }
+		.model-tool-gemini { color: rgba(255, 220, 120, 0.78); }
+		.model-tool-stack-overflow { color: rgba(255, 150, 120, 0.78); }
+		.model-tool-github { color: rgba(210, 210, 220, 0.78); }
+		.model-tool-geeksforgeeks { color: rgba(150, 235, 170, 0.78); }
+		.model-tool-other { color: rgba(160, 160, 170, 0.78); }
 		.preview {
 			font-size: 0.88em;
 			opacity: 0.82;
@@ -271,6 +299,26 @@ function buildHtml(nonce: string, cspSource: string): string {
 			return div;
 		}
 
+		function slugifyToken(text) {
+			return String(text || '')
+				.trim()
+				.toLowerCase()
+				.replace(/[^a-z0-9]+/g, '-')
+				.replace(/(^-|-$)/g, '');
+		}
+
+		const KNOWN_TOOL_SLUGS = new Set([
+			'chatgpt',
+			'cursor',
+			'copilot',
+			'claude',
+			'gemini',
+			'stack-overflow',
+			'geeksforgeeks',
+			'github',
+			'other',
+		]);
+
 		function createRecordItem(record) {
 			const li = document.createElement('li');
 			li.className = 'record';
@@ -281,7 +329,33 @@ function buildHtml(nonce: string, cspSource: string): string {
 
 			const meta = document.createElement('div');
 			meta.className = 'meta';
-			meta.textContent = record.time + ' • ' + record.tool + ' • ' + record.model;
+			const timeSpan = document.createElement('span');
+			timeSpan.textContent = record.time;
+
+			const toolSpan = document.createElement('span');
+			const toolSlug = slugifyToken(record.tool);
+			toolSpan.className = 'tool-token';
+			toolSpan.textContent = record.tool;
+			if (KNOWN_TOOL_SLUGS.has(toolSlug)) {
+				toolSpan.classList.add('tool-' + toolSlug);
+			} else {
+				toolSpan.classList.add('token-unknown');
+			}
+
+			const modelSpan = document.createElement('span');
+			modelSpan.className = 'model-token';
+			modelSpan.textContent = record.model;
+			if (KNOWN_TOOL_SLUGS.has(toolSlug)) {
+				modelSpan.classList.add('model-tool-' + toolSlug);
+			} else {
+				modelSpan.classList.add('token-unknown');
+			}
+
+			meta.appendChild(timeSpan);
+			meta.appendChild(document.createTextNode(' • '));
+			meta.appendChild(toolSpan);
+			meta.appendChild(document.createTextNode(' • '));
+			meta.appendChild(modelSpan);
 
 			const preview = document.createElement('div');
 			preview.className = 'preview';
