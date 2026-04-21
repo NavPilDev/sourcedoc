@@ -869,6 +869,7 @@ function buildHtml(nonce: string, cspSource: string): string {
 						rowsContainer.innerHTML = '';
 						return;
 					}
+					const total = items.reduce((s, d) => s + (d?.value || 0), 0) || 1;
 					if (mode === 'none') {
 						chartContainer.innerHTML = '<div class="empty">Chart hidden.</div>';
 					} else if (mode === 'bar') {
@@ -881,9 +882,21 @@ function buildHtml(nonce: string, cspSource: string): string {
 
 					rowsContainer.innerHTML = '';
 					for (const item of items) {
+						const pct = ((item.value / total) * 100);
 						const row = document.createElement('div');
 						row.className = 'stat-row';
-						row.innerHTML = '<span>' + item.label + '</span><strong>' + item.value + '</strong>';
+						row.innerHTML =
+							'<span>' +
+							item.label +
+							'</span>' +
+							'<span style="display:inline-flex;align-items:baseline;gap:8px;justify-content:flex-end;">' +
+							'<strong>' +
+							item.value +
+							'</strong>' +
+							'<span style="opacity:0.72;font-size:0.9em;min-width:52px;text-align:right;">' +
+							pct.toFixed(1) +
+							'%</span>' +
+							'</span>';
 						rowsContainer.appendChild(row);
 					}
 				}

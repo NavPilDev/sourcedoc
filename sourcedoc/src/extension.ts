@@ -850,6 +850,7 @@ export function activate(context: vscode.ExtensionContext): void {
 						): number {
 							const left = doc.page.margins.left;
 							const startY = y;
+							const total = items.reduce((s, d) => s + (d?.value || 0), 0) || 1;
 
 							doc.x = x;
 							doc.y = startY;
@@ -877,7 +878,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
 							doc.x = x;
 							for (const row of items) {
-								doc.fontSize(10).fillColor('#000000').text(`- ${row.label}: ${row.value}`, x, doc.y, { width });
+								const pct = (row.value / total) * 100;
+								doc.fontSize(10)
+									.fillColor('#000000')
+									.text(`- ${row.label}: ${row.value} (${pct.toFixed(1)}%)`, x, doc.y, { width });
 							}
 
 							doc.fillColor('#000000');
@@ -908,9 +912,20 @@ export function activate(context: vscode.ExtensionContext): void {
 						doc.fontSize(14).text('Tracked Code Blocks');
 						doc.moveDown(0.5);
 
-						for (const a of annotations) {
+						for (const [annotationIdx, a] of annotations.entries()) {
 							const left = doc.page.margins.left;
+							const right = doc.page.width - doc.page.margins.right;
 							doc.x = left;
+
+							// Colored tag for quick visual scanning
+							const tagColor = palette(annotationIdx);
+							const tagY = doc.y;
+							doc.save();
+							doc.rect(left, tagY, 4, 22).fill(tagColor);
+							doc.restore();
+
+							// Nudge text slightly right so it doesn't collide with tag
+							doc.x = left + 8;
 
 							const header = `${a.source.tool || 'Unspecified tool'} • ${a.source.model || 'No model'}`;
 							doc.fontSize(11).fillColor('#000000').text(header);
@@ -933,7 +948,7 @@ export function activate(context: vscode.ExtensionContext): void {
 							doc.text(previewText, boxLeft, boxTop, { width: boxWidth, height: boxHeight });
 							doc.fillColor('#000000').font('Helvetica').fontSize(11);
 							doc.y = boxTop + boxHeight + 6;
-							doc.x = left;
+							doc.x = left + 8;
 
 							if (a.source.prompt) {
 								doc.fontSize(10).fillColor('#444444').text('Prompt:');
@@ -947,6 +962,21 @@ export function activate(context: vscode.ExtensionContext): void {
 							}
 
 							doc.moveDown(0.8);
+
+							// Separator between annotations
+							if (annotationIdx < annotations.length - 1) {
+								const yLine = doc.y;
+								doc.save();
+								doc
+									.moveTo(left, yLine)
+									.lineTo(right, yLine)
+									.strokeColor('rgba(0,0,0,0.15)')
+									.lineWidth(1)
+									.stroke();
+								doc.restore();
+								doc.moveDown(0.6);
+							}
+
 							if (doc.y > doc.page.height - 120) {
 								doc.addPage();
 							}
