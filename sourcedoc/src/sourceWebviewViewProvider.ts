@@ -41,7 +41,7 @@ interface WebviewUpdateMessage {
 	// 🔥 NEW
 	exportData?: ExportAnnotation[];
 	settings?: WebviewSettingsState;
-	exportChartPrefs?: { tools: 'bar' | 'pie' | 'donut'; models: 'bar' | 'pie' | 'donut' };
+	exportChartPrefs?: { tools: 'bar' | 'pie' | 'donut' | 'none'; models: 'bar' | 'pie' | 'donut' | 'none' };
 }
 
 function fileLabelForUri(uri: vscode.Uri): string {
@@ -842,7 +842,8 @@ function buildHtml(nonce: string, cspSource: string): string {
 				select.innerHTML =
 					'<option value="bar">Bar</option>' +
 					'<option value="pie">Pie</option>' +
-					'<option value="donut">Donut</option>';
+					'<option value="donut">Donut</option>' +
+					'<option value="none">None</option>';
 
 				const prefs = getChartPrefs();
 				select.value = prefs[prefTarget] || 'donut';
@@ -868,7 +869,9 @@ function buildHtml(nonce: string, cspSource: string): string {
 						rowsContainer.innerHTML = '';
 						return;
 					}
-					if (mode === 'bar') {
+					if (mode === 'none') {
+						chartContainer.innerHTML = '<div class="empty">Chart hidden.</div>';
+					} else if (mode === 'bar') {
 						chartContainer.innerHTML = renderBarChart(items);
 					} else if (mode === 'pie') {
 						chartContainer.innerHTML = renderPieLike(items, false);
@@ -941,23 +944,90 @@ function buildHtml(nonce: string, cspSource: string): string {
 
 		function renderExport(data) {
 			const wrapper = document.createElement('div');
+			wrapper.className = 'settings';
+
+			const prefs = (window.__exportChartPrefs || { tools: 'donut', models: 'donut' });
+			const currentName = window.__exportFilename || 'sourcedoc.pdf';
+
+			const settingsCard = document.createElement('div');
+			settingsCard.className = 'setting';
+			settingsCard.innerHTML =
+				'<div class="setting-title">Export Settings</div>' +
+				'<div class="setting-desc">Choose which graphs to include in the exported PDF and what file name to suggest.</div>';
+
+			const toolsRow = document.createElement('div');
+			toolsRow.style.display = 'flex';
+			toolsRow.style.justifyContent = 'space-between';
+			toolsRow.style.alignItems = 'center';
+			toolsRow.style.gap = '10px';
+			toolsRow.style.marginTop = '10px';
+			toolsRow.innerHTML =
+				'<div style="font-weight:600;">Tools graph</div>' +
+				'<select id="exportToolsChart" style="max-width:140px;">' +
+				'<option value="bar">Bar</option>' +
+				'<option value="pie">Pie</option>' +
+				'<option value="donut">Donut</option>' +
+				'<option value="none">None</option>' +
+				'</select>';
+
+			const modelsRow = document.createElement('div');
+			modelsRow.style.display = 'flex';
+			modelsRow.style.justifyContent = 'space-between';
+			modelsRow.style.alignItems = 'center';
+			modelsRow.style.gap = '10px';
+			modelsRow.style.marginTop = '8px';
+			modelsRow.innerHTML =
+				'<div style="font-weight:600;">Models graph</div>' +
+				'<select id="exportModelsChart" style="max-width:140px;">' +
+				'<option value="bar">Bar</option>' +
+				'<option value="pie">Pie</option>' +
+				'<option value="donut">Donut</option>' +
+				'<option value="none">None</option>' +
+				'</select>';
+
+			const nameLabel = document.createElement('div');
+			nameLabel.style.marginTop = '10px';
+			nameLabel.style.fontWeight = '600';
+			nameLabel.textContent = 'Export file name';
+
+			const nameInput = document.createElement('input');
+			nameInput.id = 'exportFilename';
+			nameInput.value = currentName;
+			nameInput.placeholder = 'example.pdf';
+			nameInput.addEventListener('input', () => {
+				window.__exportFilename = nameInput.value;
+			});
 
 			const btn = document.createElement('button');
+			btn.className = 'primary-btn';
 			btn.textContent = 'Export PDF';
-			btn.style.padding = '8px';
-			btn.style.marginBottom = '10px';
+			btn.style.marginBottom = '0';
 
-			btn.onclick = () => {
-				vscode.postMessage({ type: 'exportPdf' });
-			};
+			settingsCard.appendChild(toolsRow);
+			settingsCard.appendChild(modelsRow);
+			settingsCard.appendChild(nameLabel);
+			settingsCard.appendChild(nameInput);
+			settingsCard.appendChild(document.createElement('div')).className = 'empty';
 
+			wrapper.appendChild(settingsCard);
 			wrapper.appendChild(btn);
 
-			const hint = document.createElement('div');
-			hint.className = 'empty';
-			hint.textContent =
-				'Exports a PDF for the active file, including the last-selected Tools/Models chart types from Stats.';
-			wrapper.appendChild(hint);
+			const toolsSel = toolsRow.querySelector('#exportToolsChart');
+			const modelsSel = modelsRow.querySelector('#exportModelsChart');
+			if (toolsSel) toolsSel.value = prefs.tools || 'donut';
+			if (modelsSel) modelsSel.value = prefs.models || 'donut';
+
+			btn.onclick = () => {
+				const tools = (toolsSel && toolsSel.value) || 'donut';
+				const models = (modelsSel && modelsSel.value) || 'donut';
+				const filename = (nameInput.value || '').trim() || 'sourcedoc.pdf';
+				window.__exportFilename = filename;
+				vscode.postMessage({
+					type: 'exportPdf',
+					filename,
+					charts: { tools, models }
+				});
+			};
 
 			contentEl.replaceChildren(wrapper);
 		}
@@ -1065,7 +1135,7 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 	private currentView: ViewMode = 'annotations';
 	private readonly disposables: vscode.Disposable[] = [];
 	private settings: WebviewSettingsState = { autoHideMarkers: false, autoAnnotationDetection: true, lightMode: false };
-	private exportChartPrefs: { tools: 'bar' | 'pie' | 'donut'; models: 'bar' | 'pie' | 'donut' } = {
+	private exportChartPrefs: { tools: 'bar' | 'pie' | 'donut' | 'none'; models: 'bar' | 'pie' | 'donut' | 'none' } = {
 		tools: 'donut',
 		models: 'donut',
 	};
@@ -1184,7 +1254,7 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 				}
 
 				if (msg.type === 'setExportChart' && typeof msg.target === 'string' && typeof msg.value === 'string') {
-					const v = msg.value === 'bar' || msg.value === 'pie' || msg.value === 'donut' ? msg.value : undefined;
+					const v = msg.value === 'bar' || msg.value === 'pie' || msg.value === 'donut' || msg.value === 'none' ? msg.value : undefined;
 					if (!v) return;
 					if (msg.target === 'tools') {
 						this.exportChartPrefs.tools = v;
@@ -1242,7 +1312,10 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 				}
 
 				if (msg.type === 'exportPdf') {
-					await vscode.commands.executeCommand('sourcedoc.exportPdf');
+					await vscode.commands.executeCommand('sourcedoc.exportPdf', {
+						filename: typeof msg.filename === 'string' ? msg.filename : undefined,
+						charts: msg.charts
+					});
 					return;
 				}
 			})
@@ -1259,8 +1332,8 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 			lightMode: this.context.workspaceState.get<boolean>(SourceWebviewViewProvider.SETTINGS_LIGHT_MODE, false),
 		};
 		this.exportChartPrefs = {
-			tools: this.context.workspaceState.get<'bar' | 'pie' | 'donut'>(SourceWebviewViewProvider.EXPORT_CHART_TOOLS, 'donut'),
-			models: this.context.workspaceState.get<'bar' | 'pie' | 'donut'>(SourceWebviewViewProvider.EXPORT_CHART_MODELS, 'donut'),
+			tools: this.context.workspaceState.get<'bar' | 'pie' | 'donut' | 'none'>(SourceWebviewViewProvider.EXPORT_CHART_TOOLS, 'donut'),
+			models: this.context.workspaceState.get<'bar' | 'pie' | 'donut' | 'none'>(SourceWebviewViewProvider.EXPORT_CHART_MODELS, 'donut'),
 		};
 		this.markers.setAutoHide(this.settings.autoHideMarkers);
 

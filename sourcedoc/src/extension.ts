@@ -623,22 +623,43 @@ export function activate(context: vscode.ExtensionContext): void {
 	// EXPORT PDF
 	// =========================
 	context.subscriptions.push(
-		vscode.commands.registerCommand('sourcedoc.exportPdf', async () => {
+		vscode.commands.registerCommand('sourcedoc.exportPdf', async (args?: unknown) => {
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) {
 				vscode.window.showWarningMessage('No active editor to export.');
 				return;
 			}
 
+			const exportArgs = args as
+				| {
+						filename?: string;
+						charts?: { tools?: string; models?: string };
+				  }
+				| undefined;
+
 			const uri = editor.document.uri;
 			const annotations = model.getAnnotations(uri);
 			const stats = model.getStats(uri);
 
-			const toolsChart = context.workspaceState.get<'bar' | 'pie' | 'donut'>('sourcedoc.export.chart.tools', 'donut');
-			const modelsChart = context.workspaceState.get<'bar' | 'pie' | 'donut'>('sourcedoc.export.chart.models', 'donut');
+			type ChartMode = 'bar' | 'pie' | 'donut' | 'none';
+			const normalizeChartMode = (v: unknown): ChartMode | undefined => {
+				return v === 'bar' || v === 'pie' || v === 'donut' || v === 'none' ? v : undefined;
+			};
+
+			const toolsChart =
+				normalizeChartMode(exportArgs?.charts?.tools) ??
+				context.workspaceState.get<ChartMode>('sourcedoc.export.chart.tools', 'donut');
+			const modelsChart =
+				normalizeChartMode(exportArgs?.charts?.models) ??
+				context.workspaceState.get<ChartMode>('sourcedoc.export.chart.models', 'donut');
 
 			const fileLabel = vscode.workspace.asRelativePath(uri);
-			const defaultName = (fileLabel.split(/[\\/]/).pop() || 'sourcedoc') + '.pdf';
+			const computedDefaultName = (fileLabel.split(/[\\/]/).pop() || 'sourcedoc') + '.pdf';
+			const requestedName =
+				typeof exportArgs?.filename === 'string' && exportArgs.filename.trim()
+					? exportArgs.filename.trim()
+					: undefined;
+			const defaultName = requestedName || computedDefaultName;
 
 			const saveUri = await vscode.window.showSaveDialog({
 				defaultUri: vscode.Uri.file(defaultName),
@@ -679,32 +700,218 @@ export function activate(context: vscode.ExtensionContext): void {
 						// File Stats
 						doc.fontSize(14).text('File Stats');
 						doc.moveDown(0.3);
-						doc.fontSize(11).fillColor('#444444').text(`Charts: Tools=${toolsChart}, Models=${modelsChart}`);
 						doc.fillColor('#000000');
-						doc.moveDown(0.5);
 
 						doc.fontSize(11).text(`Total annotations: ${stats.totalAnnotations}`);
 						doc.fontSize(11).text(`Annotated lines: ${stats.annotatedLines}`);
 						doc.fontSize(11).text(`Avg edit ratio: ${((stats.avgEditRatio ?? 0) * 100).toFixed(1)}%`);
 						doc.moveDown(0.6);
 
-						doc.fontSize(12).text('Tools');
-						for (const row of stats.toolsBreakdown) {
-							doc.fontSize(10).text(`- ${row.label}: ${row.value}`);
+						function palette(i: number): string {
+							const colors = [
+								'#78dcaa',
+								'#96c8ff',
+								'#bea0ff',
+								'#ffb478',
+								'#ffdc78',
+								'#ff9678',
+								'#d2d2dc',
+								'#96ebaa',
+								'#a0a0aa',
+							];
+							return colors[i % colors.length]!;
 						}
-						doc.moveDown(0.4);
 
-						doc.fontSize(12).text('Models');
-						for (const row of stats.modelsBreakdown) {
-							doc.fontSize(10).text(`- ${row.label}: ${row.value}`);
+						function ensureSpace(height: number): void {
+							const bottom = doc.page.height - doc.page.margins.bottom;
+							if (doc.y + height > bottom) {
+								doc.addPage();
+							}
 						}
-						doc.moveDown(1);
+
+						function drawBarChart(items: Array<{ label: string; value: number }>, width = 300): number {
+							const left = doc.page.margins.left;
+							const rowH = 14;
+							const barH = 8;
+							const labelW = 110;
+							const valueW = 34;
+							const barW = Math.max(80, width - labelW - valueW - 16);
+							const max = Math.max(...items.map((d) => d.value), 1);
+							const rows = items.slice(0, 8);
+
+							const startY = doc.y;
+							for (let i = 0; i < rows.length; i++) {
+								const y = startY + i * rowH;
+								const item = rows[i]!;
+								doc.fontSize(9).fillColor('#444444').text(String(item.label), left, y, { width: labelW, lineBreak: false });
+
+								const bx = left + labelW + 8;
+								const by = y + 2;
+								doc.save();
+								doc
+									.rect(bx, by, barW, barH)
+									.fillOpacity(0.25)
+									.fill('#777777');
+								doc.restore();
+
+								const w = Math.round((item.value / max) * barW);
+								doc.rect(bx, by, w, barH).fill(palette(i));
+
+								doc.fontSize(9).fillColor('#111111').text(String(item.value), bx + barW + 8, y, { width: valueW });
+							}
+
+							doc.fillColor('#000000');
+							doc.y = startY + rows.length * rowH + 6;
+							doc.x = left;
+							return doc.y - startY;
+						}
+
+						function arcPath(cx: number, cy: number, rOuter: number, rInner: number, a0: number, a1: number): string {
+							const large = a1 - a0 > Math.PI ? 1 : 0;
+							const x0 = cx + Math.cos(a0) * rOuter;
+							const y0 = cy + Math.sin(a0) * rOuter;
+							const x1 = cx + Math.cos(a1) * rOuter;
+							const y1 = cy + Math.sin(a1) * rOuter;
+							const x2 = cx + Math.cos(a1) * rInner;
+							const y2 = cy + Math.sin(a1) * rInner;
+							const x3 = cx + Math.cos(a0) * rInner;
+							const y3 = cy + Math.sin(a0) * rInner;
+							return `M ${x0} ${y0} A ${rOuter} ${rOuter} 0 ${large} 1 ${x1} ${y1} L ${x2} ${y2} A ${rInner} ${rInner} 0 ${large} 0 ${x3} ${y3} Z`;
+						}
+
+						function drawPieLike(items: Array<{ label: string; value: number }>, donut: boolean): number {
+							const left = doc.page.margins.left;
+							const size = 140;
+							const cx = left + 70;
+							const cy = doc.y + 70;
+							const rOuter = 60;
+							const rInner = donut ? 34 : 0.001;
+
+							const data = items.slice(0, 8);
+							const total = data.reduce((s, d) => s + d.value, 0) || 1;
+							let angle = -Math.PI / 2;
+
+							for (let idx = 0; idx < data.length; idx++) {
+								const d = data[idx]!;
+								const slice = (d.value / total) * Math.PI * 2;
+								const a0 = angle;
+								const a1 = angle + slice;
+								angle = a1;
+
+								const path = arcPath(cx, cy, rOuter, rInner, a0, a1);
+								doc.path(path).fill(palette(idx));
+							}
+
+							if (donut) {
+								// PDF background is white; fill center to avoid weird overlaps
+								doc.circle(cx, cy, 28).fill('#ffffff');
+							}
+
+							doc.y = doc.y + size + 6;
+							doc.x = left;
+							return size + 6;
+						}
+
+						function renderStatsSection(
+							title: string,
+							mode: ChartMode,
+							items: Array<{ label: string; value: number }>
+						): void {
+							const left = doc.page.margins.left;
+							doc.x = left;
+							doc.fontSize(12).fillColor('#000000').text(title);
+							doc.moveDown(0.2);
+
+							if (mode !== 'none' && items.length > 0) {
+								ensureSpace(mode === 'bar' ? 130 : 160);
+								if (mode === 'bar') {
+									drawBarChart(items);
+								} else if (mode === 'pie') {
+									drawPieLike(items, false);
+								} else {
+									drawPieLike(items, true);
+								}
+							}
+
+							doc.x = left;
+							for (const row of items) {
+								doc.fontSize(10).fillColor('#000000').text(`- ${row.label}: ${row.value}`);
+							}
+							doc.moveDown(0.4);
+						}
+
+						function renderStatsColumn(
+							x: number,
+							y: number,
+							width: number,
+							title: string,
+							mode: ChartMode,
+							items: Array<{ label: string; value: number }>
+						): number {
+							const left = doc.page.margins.left;
+							const startY = y;
+
+							doc.x = x;
+							doc.y = startY;
+							doc.fontSize(12).fillColor('#000000').text(title, x, doc.y, { width });
+							doc.moveDown(0.2);
+
+							if (mode !== 'none' && items.length > 0) {
+								if (mode === 'bar') {
+									const priorLeft = doc.page.margins.left;
+									doc.page.margins.left = x;
+									drawBarChart(items, width);
+									doc.page.margins.left = priorLeft;
+								} else if (mode === 'pie') {
+									const priorLeft = doc.page.margins.left;
+									doc.page.margins.left = x;
+									drawPieLike(items, false);
+									doc.page.margins.left = priorLeft;
+								} else {
+									const priorLeft = doc.page.margins.left;
+									doc.page.margins.left = x;
+									drawPieLike(items, true);
+									doc.page.margins.left = priorLeft;
+								}
+							}
+
+							doc.x = x;
+							for (const row of items) {
+								doc.fontSize(10).fillColor('#000000').text(`- ${row.label}: ${row.value}`, x, doc.y, { width });
+							}
+
+							doc.fillColor('#000000');
+							doc.x = left;
+							return doc.y;
+						}
+
+						// Tools + Models side-by-side
+						ensureSpace(260);
+						{
+							const left = doc.page.margins.left;
+							const right = doc.page.width - doc.page.margins.right;
+							const gap = 18;
+							const colW = (right - left - gap) / 2;
+							const rowTop = doc.y;
+
+							const toolsEndY = renderStatsColumn(left, rowTop, colW, 'Tools', toolsChart, stats.toolsBreakdown || []);
+							const modelsEndY = renderStatsColumn(left + colW + gap, rowTop, colW, 'Models', modelsChart, stats.modelsBreakdown || []);
+
+							doc.x = left;
+							doc.y = Math.max(toolsEndY, modelsEndY);
+							doc.moveDown(0.2);
+						}
+
+						doc.moveDown(0.6);
 
 						// Tracked blocks
 						doc.fontSize(14).text('Tracked Code Blocks');
 						doc.moveDown(0.5);
 
 						for (const a of annotations) {
+							const left = doc.page.margins.left;
+							doc.x = left;
+
 							const header = `${a.source.tool || 'Unspecified tool'} • ${a.source.model || 'No model'}`;
 							doc.fontSize(11).fillColor('#000000').text(header);
 							doc.fontSize(10).fillColor('#444444').text(
@@ -715,7 +922,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 							// Preview code block (Monokai-ish)
 							const previewText = a.textPreview || '(No preview available)';
-							const boxLeft = doc.x;
+							const boxLeft = left;
 							const boxWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
 							const boxTop = doc.y + 4;
 							const boxHeight = 58;
@@ -723,9 +930,10 @@ export function activate(context: vscode.ExtensionContext): void {
 							doc.rect(boxLeft, boxTop, boxWidth, boxHeight).fill('#2d2a2e');
 							doc.restore();
 							doc.fillColor('#fcfcfa').font('Courier').fontSize(9);
-							doc.text(previewText, boxLeft + 10, boxTop + 10, { width: boxWidth - 20, height: boxHeight - 20 });
+							doc.text(previewText, boxLeft, boxTop, { width: boxWidth, height: boxHeight });
 							doc.fillColor('#000000').font('Helvetica').fontSize(11);
 							doc.y = boxTop + boxHeight + 6;
+							doc.x = left;
 
 							if (a.source.prompt) {
 								doc.fontSize(10).fillColor('#444444').text('Prompt:');
