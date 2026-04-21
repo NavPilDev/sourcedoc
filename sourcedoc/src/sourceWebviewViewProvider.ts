@@ -14,6 +14,7 @@ type ViewMode = 'annotations' | 'stats' | 'export' | 'settings';
 interface WebviewSettingsState {
 	autoHideMarkers: boolean;
 	autoAnnotationDetection: boolean;
+	lightMode: boolean;
 }
 
 interface WebviewRecordRow {
@@ -100,11 +101,43 @@ function buildHtml(nonce: string, cspSource: string): string {
 	<style>
 		:root {
 			color-scheme: light dark;
+
+			/* SourceDoc theme tokens (default: dark) */
+			--sd-bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
+			--sd-fg: var(--vscode-foreground);
+			--sd-muted: color-mix(in srgb, var(--sd-fg) 75%, transparent);
+			--sd-border: var(--vscode-widget-border, rgba(127,127,127,0.25));
+			--sd-surface: var(--vscode-editorWidget-background, rgba(127,127,127,0.08));
+			--sd-surfaceHover: var(--vscode-list-hoverBackground, rgba(127,127,127,0.14));
+			--sd-accent: var(--vscode-button-background);
+			--sd-accentFg: var(--vscode-button-foreground);
+			--sd-codeBg: rgba(127,127,127,0.12);
+			--sd-codeFg: var(--sd-fg);
 		}
+
+		:root[data-sd-theme='light'] {
+			color-scheme: light;
+			--sd-bg: #ffffff;
+			--sd-fg: #1f2328;
+			--sd-muted: rgba(31, 35, 40, 0.7);
+			--sd-border: rgba(31, 35, 40, 0.18);
+			--sd-surface: rgba(31, 35, 40, 0.05);
+			--sd-surfaceHover: rgba(31, 35, 40, 0.08);
+			--sd-accent: #0969da;
+			--sd-accentFg: #ffffff;
+			--sd-codeBg: rgba(31, 35, 40, 0.06);
+			--sd-codeFg: #1f2328;
+		}
+
+		:root[data-sd-theme='dark'] {
+			color-scheme: dark;
+		}
+
 		body {
 			font-family: var(--vscode-font-family);
 			font-size: var(--vscode-font-size);
-			color: var(--vscode-foreground);
+			color: var(--sd-fg);
+			background: var(--sd-bg);
 			padding: 10px;
 			margin: 0;
 		}
@@ -166,15 +199,15 @@ function buildHtml(nonce: string, cspSource: string): string {
 			margin: 0;
 		}
 		li.record {
-			border: 1px solid var(--vscode-widget-border, rgba(127,127,127,0.25));
+			border: 1px solid var(--sd-border);
 			border-radius: 10px;
 			padding: 10px;
 			margin-bottom: 8px;
 			cursor: pointer;
-			background: var(--vscode-editorWidget-background, rgba(127,127,127,0.08));
+			background: var(--sd-surface);
 		}
 		li.record:hover {
-			background: var(--vscode-list-hoverBackground, rgba(127,127,127,0.14));
+			background: var(--sd-surfaceHover);
 		}
 		.lines {
 			font-weight: 600;
@@ -217,8 +250,8 @@ function buildHtml(nonce: string, cspSource: string): string {
 			margin: 6px 0 8px;
 			padding: 10px 10px;
 			border-radius: 10px;
-			border: 1px solid rgba(127,127,127,0.25);
-			background: #2d2a2e; /* Monokai Pro classic-ish */
+			border: 1px solid var(--sd-border);
+			background: var(--sd-codeBg);
 			overflow: auto;
 			max-height: 180px;
 		}
@@ -228,7 +261,7 @@ function buildHtml(nonce: string, cspSource: string): string {
 			font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
 			font-size: 0.86em;
 			line-height: 1.45;
-			color: #fcfcfa; /* warm off-white */
+			color: var(--sd-codeFg);
 		}
 		.section {
 			margin-top: 8px;
@@ -254,10 +287,10 @@ function buildHtml(nonce: string, cspSource: string): string {
 			gap: 10px;
 		}
 		.setting {
-			border: 1px solid var(--vscode-widget-border, rgba(127,127,127,0.25));
+			border: 1px solid var(--sd-border);
 			border-radius: 10px;
 			padding: 10px;
-			background: var(--vscode-editorWidget-background, rgba(127,127,127,0.08));
+			background: var(--sd-surface);
 		}
 		.setting-top {
 			display: flex;
@@ -273,6 +306,19 @@ function buildHtml(nonce: string, cspSource: string): string {
 			margin-top: 6px;
 			line-height: 1.4;
 			font-size: 0.9em;
+		}
+		.switch-col {
+			display: flex;
+			flex-direction: column;
+			align-items: flex-end;
+			gap: 4px;
+			flex: 0 0 auto;
+		}
+		.setting-state {
+			font-size: 0.78em;
+			line-height: 1;
+			color: var(--sd-muted);
+			user-select: none;
 		}
 		.switch {
 			position: relative;
@@ -350,10 +396,10 @@ function buildHtml(nonce: string, cspSource: string): string {
 			gap: 8px;
 		}
 		.stat-card {
-			border: 1px solid var(--vscode-widget-border, rgba(127,127,127,0.25));
+			border: 1px solid var(--sd-border);
 			border-radius: 10px;
 			padding: 10px;
-			background: var(--vscode-editorWidget-background, rgba(127,127,127,0.08));
+			background: var(--sd-surface);
 		}
 		.stat-title {
 			font-weight: 700;
@@ -387,6 +433,7 @@ function buildHtml(nonce: string, cspSource: string): string {
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
 		let currentView = 'annotations';
+		document.documentElement.dataset.sdTheme = 'dark';
 
 		const fileEl = document.getElementById('file');
 		const contentEl = document.getElementById('content');
@@ -867,6 +914,9 @@ function buildHtml(nonce: string, cspSource: string): string {
 				return;
 			}
 
+			// forced light/dark palette
+			document.documentElement.dataset.sdTheme = msg?.settings?.lightMode ? 'light' : 'dark';
+
 			// cache export chart prefs so Stats dropdowns render consistently
 			if (msg.exportChartPrefs) {
 				window.__exportChartPrefs = msg.exportChartPrefs;
@@ -916,15 +966,33 @@ function buildHtml(nonce: string, cspSource: string): string {
 			const wrapper = document.createElement('div');
 			wrapper.className = 'settings';
 
+			const lightModeSetting = document.createElement('div');
+			lightModeSetting.className = 'setting';
+			lightModeSetting.innerHTML =
+				'<div class="setting-top">' +
+				'<div class="setting-title">Light Mode</div>' +
+				'<div class="switch-col">' +
+				'<label class="switch">' +
+				'<input type="checkbox" id="lightMode">' +
+				'<span class="slider"></span>' +
+				'</label>' +
+				'<div class="setting-state" id="lightModeState"></div>' +
+				'</div>' +
+				'</div>' +
+				'<div class="setting-desc">Forces a light palette for the SourceDoc webview and the AI annotation modal (default is dark).</div>';
+
 			const autoHide = document.createElement('div');
 			autoHide.className = 'setting';
 			autoHide.innerHTML =
 				'<div class="setting-top">' +
 				'<div class="setting-title">Auto Hide Markers</div>' +
+				'<div class="switch-col">' +
 				'<label class="switch">' +
 				'<input type="checkbox" id="autoHideMarkers">' +
 				'<span class="slider"></span>' +
 				'</label>' +
+				'<div class="setting-state" id="autoHideMarkersState"></div>' +
+				'</div>' +
 				'</div>' +
 				'<div class="setting-desc">Hide editor markers by default. Markers will briefly reveal only for the selected code block when you click “Go to code”.</div>';
 
@@ -933,28 +1001,54 @@ function buildHtml(nonce: string, cspSource: string): string {
 			autoDetect.innerHTML =
 				'<div class="setting-top">' +
 				'<div class="setting-title">Automatic Annotation Detection</div>' +
+				'<div class="switch-col">' +
 				'<label class="switch">' +
 				'<input type="checkbox" id="autoAnnotationDetection">' +
 				'<span class="slider"></span>' +
 				'</label>' +
+				'<div class="setting-state" id="autoAnnotationDetectionState"></div>' +
+				'</div>' +
 				'</div>' +
 				'<div class="setting-desc">When off, SourceDoc won’t pop up the annotation modal automatically on paste. Use “Annotate Selected Code” to annotate manually.</div>';
 
+			wrapper.appendChild(lightModeSetting);
 			wrapper.appendChild(autoHide);
 			wrapper.appendChild(autoDetect);
 			contentEl.replaceChildren(wrapper);
 
+			function setStateText(stateEl, checked, onText, offText) {
+				if (!stateEl) return;
+				stateEl.textContent = checked ? onText : offText;
+			}
+
+			const lightEl = document.getElementById('lightMode');
+			const lightStateEl = document.getElementById('lightModeState');
 			const hideEl = document.getElementById('autoHideMarkers');
+			const hideStateEl = document.getElementById('autoHideMarkersState');
 			const detectEl = document.getElementById('autoAnnotationDetection');
+			const detectStateEl = document.getElementById('autoAnnotationDetectionState');
+
+			if (lightEl) {
+				lightEl.checked = !!settings?.lightMode;
+				setStateText(lightStateEl, !!lightEl.checked, 'Light', 'Dark');
+				lightEl.addEventListener('change', () => {
+					setStateText(lightStateEl, !!lightEl.checked, 'Light', 'Dark');
+					vscode.postMessage({ type: 'setSetting', key: 'lightMode', value: !!lightEl.checked });
+				});
+			}
 			if (hideEl) {
 				hideEl.checked = !!settings?.autoHideMarkers;
+				setStateText(hideStateEl, !!hideEl.checked, 'On', 'Off');
 				hideEl.addEventListener('change', () => {
+					setStateText(hideStateEl, !!hideEl.checked, 'On', 'Off');
 					vscode.postMessage({ type: 'setSetting', key: 'autoHideMarkers', value: !!hideEl.checked });
 				});
 			}
 			if (detectEl) {
 				detectEl.checked = settings?.autoAnnotationDetection !== false;
+				setStateText(detectStateEl, !!detectEl.checked, 'On', 'Off');
 				detectEl.addEventListener('change', () => {
+					setStateText(detectStateEl, !!detectEl.checked, 'On', 'Off');
 					vscode.postMessage({ type: 'setSetting', key: 'autoAnnotationDetection', value: !!detectEl.checked });
 				});
 			}
@@ -970,7 +1064,7 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 	private webviewView?: vscode.WebviewView;
 	private currentView: ViewMode = 'annotations';
 	private readonly disposables: vscode.Disposable[] = [];
-	private settings: WebviewSettingsState = { autoHideMarkers: false, autoAnnotationDetection: true };
+	private settings: WebviewSettingsState = { autoHideMarkers: false, autoAnnotationDetection: true, lightMode: false };
 	private exportChartPrefs: { tools: 'bar' | 'pie' | 'donut'; models: 'bar' | 'pie' | 'donut' } = {
 		tools: 'donut',
 		models: 'donut',
@@ -978,6 +1072,7 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 
 	private static readonly SETTINGS_AUTO_HIDE = 'sourcedoc.settings.autoHideMarkers';
 	private static readonly SETTINGS_AUTO_DETECT = 'sourcedoc.settings.autoAnnotationDetection';
+	private static readonly SETTINGS_LIGHT_MODE = 'sourcedoc.settings.lightMode';
 	private static readonly EXPORT_CHART_TOOLS = 'sourcedoc.export.chart.tools';
 	private static readonly EXPORT_CHART_MODELS = 'sourcedoc.export.chart.models';
 
@@ -1080,6 +1175,10 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 						this.settings.autoAnnotationDetection = value;
 						await this.context.workspaceState.update(SourceWebviewViewProvider.SETTINGS_AUTO_DETECT, value);
 						postUpdate();
+					} else if (msg.key === 'lightMode') {
+						this.settings.lightMode = value;
+						await this.context.workspaceState.update(SourceWebviewViewProvider.SETTINGS_LIGHT_MODE, value);
+						postUpdate();
 					}
 					return;
 				}
@@ -1157,6 +1256,7 @@ export class SourceWebviewViewProvider implements vscode.WebviewViewProvider, vs
 		this.settings = {
 			autoHideMarkers: this.context.workspaceState.get<boolean>(SourceWebviewViewProvider.SETTINGS_AUTO_HIDE, false),
 			autoAnnotationDetection: this.context.workspaceState.get<boolean>(SourceWebviewViewProvider.SETTINGS_AUTO_DETECT, true),
+			lightMode: this.context.workspaceState.get<boolean>(SourceWebviewViewProvider.SETTINGS_LIGHT_MODE, false),
 		};
 		this.exportChartPrefs = {
 			tools: this.context.workspaceState.get<'bar' | 'pie' | 'donut'>(SourceWebviewViewProvider.EXPORT_CHART_TOOLS, 'donut'),

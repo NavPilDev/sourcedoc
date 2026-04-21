@@ -24,10 +24,13 @@ function detectPaste(change: vscode.TextDocumentContentChangeEvent): boolean {
 // MODAL POPUP UI
 // =========================
 async function openAnnotationModal(
+	context: vscode.ExtensionContext,
 	existing?: SourceMetadata,
 	existingRange?: vscode.Range
 ): Promise<(SourceMetadata & { startLine?: number; endLine?: number }) | undefined> {
 	return new Promise((resolve) => {
+		const lightMode = context.workspaceState.get<boolean>('sourcedoc.settings.lightMode', false);
+
 		const panel = vscode.window.createWebviewPanel(
 			'aiAnnotation',
 			'AI Annotation',
@@ -38,7 +41,7 @@ async function openAnnotationModal(
 			}
 		);
 
-		panel.webview.html = getModalHtml(existing, existingRange);
+		panel.webview.html = getModalHtml(existing, existingRange, lightMode);
 
 		panel.webview.onDidReceiveMessage((msg) => {
 			if (msg.type === 'submit') {
@@ -67,7 +70,8 @@ async function openAnnotationModal(
 // =========================
 function getModalHtml(
 	existing?: SourceMetadata,
-	existingRange?: vscode.Range
+	existingRange?: vscode.Range,
+	lightMode?: boolean
 ): string {
 	const startLine = existingRange ? existingRange.start.line + 1 : '';
 	const endLine = existingRange ? existingRange.end.line + 1 : '';
@@ -78,14 +82,35 @@ function getModalHtml(
 
 	return `
 	<!DOCTYPE html>
-	<html>
+	<html data-sd-theme="${lightMode ? 'light' : 'dark'}">
 	<head>
 	<style>
+		:root {
+			color-scheme: light dark;
+			--sd-bg: #1e1e1e;
+			--sd-fg: #ddd;
+			--sd-muted: rgba(221, 221, 221, 0.72);
+			--sd-border: #444;
+			--sd-surface: #2d2d2d;
+			--sd-accent: #007acc;
+			--sd-accentFg: #ffffff;
+		}
+		html[data-sd-theme="light"] {
+			color-scheme: light;
+			--sd-bg: #ffffff;
+			--sd-fg: #1f2328;
+			--sd-muted: rgba(31, 35, 40, 0.7);
+			--sd-border: rgba(31, 35, 40, 0.22);
+			--sd-surface: rgba(31, 35, 40, 0.06);
+			--sd-accent: #0969da;
+			--sd-accentFg: #ffffff;
+		}
+
 		body {
 			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 			padding: 16px;
-			background: #1e1e1e;
-			color: #ddd;
+			background: var(--sd-bg);
+			color: var(--sd-fg);
 		}
 
 		.header {
@@ -102,9 +127,9 @@ function getModalHtml(
 		}
 
 		.icon-btn {
-			border: 1px solid #444;
+			border: 1px solid var(--sd-border);
 			background: transparent;
-			color: #ddd;
+			color: var(--sd-fg);
 			border-radius: 8px;
 			width: 32px;
 			height: 32px;
@@ -118,7 +143,7 @@ function getModalHtml(
 
 		label {
 			font-size: 12px;
-			color: #aaa;
+			color: var(--sd-muted);
 		}
 
 		input, textarea, select {
@@ -127,9 +152,9 @@ function getModalHtml(
 			margin-bottom: 12px;
 			padding: 6px;
 			border-radius: 6px;
-			border: 1px solid #444;
-			background: #2d2d2d;
-			color: white;
+			border: 1px solid var(--sd-border);
+			background: var(--sd-surface);
+			color: var(--sd-fg);
 		}
 
 		.row {
@@ -155,40 +180,42 @@ function getModalHtml(
 		}
 
 		.save {
-			background: #007acc;
-			color: white;
+			background: var(--sd-accent);
+			color: var(--sd-accentFg);
 		}
 
 		.cancel {
-			background: #444;
-			color: white;
+			background: transparent;
+			color: var(--sd-fg);
+			border: 1px solid var(--sd-border);
 		}
 
 		.quick-tools button {
 			margin-right: 6px;
 			margin-bottom: 6px;
-			background: #333;
-			color: white;
+			background: transparent;
+			color: var(--sd-fg);
+			border: 1px solid var(--sd-border);
 			border-radius: 6px;
 			padding: 4px 8px;
 		}
 
 		.quick-btn {
-			border: 1px solid #444;
+			border: 1px solid var(--sd-border);
 		}
 
 		.quick-btn.selected {
-			background: #007acc;
-			color: white;
-			border-color: #007acc;
+			background: var(--sd-accent);
+			color: var(--sd-accentFg);
+			border-color: var(--sd-accent);
 		}
 
 		.selection-box {
 			padding: 8px;
 			border-radius: 6px;
-			border: 1px solid #444;
-			background: #2d2d2d;
-			color: white;
+			border: 1px solid var(--sd-border);
+			background: var(--sd-surface);
+			color: var(--sd-fg);
 			margin-bottom: 12px;
 			font-size: 13px;
 		}
@@ -526,7 +553,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				const range = new vscode.Range(start, end);
 				const text = change.text;
 
-				const metadata = await openAnnotationModal();
+				const metadata = await openAnnotationModal(context);
 				if (!metadata) return;
 
 				model.addAnnotation(editor.document.uri, range, text, metadata);
@@ -549,7 +576,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 
 			const text = editor.document.getText(selection);
-			const metadata = await openAnnotationModal();
+			const metadata = await openAnnotationModal(context);
 			if (!metadata) return;
 
 			model.addAnnotation(editor.document.uri, selection, text, metadata);
@@ -565,7 +592,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		const annotation = model.getAnnotationById(annotationId);
 		if (!annotation) return;
 
-		const result = await openAnnotationModal(annotation.source, annotation.range);
+		const result = await openAnnotationModal(context, annotation.source, annotation.range);
 		if (!result) return;
 
 		// 1. Update metadata (tool, model, etc.)
