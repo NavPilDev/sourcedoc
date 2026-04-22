@@ -908,6 +908,22 @@ export function activate(context: vscode.ExtensionContext): void {
 
 						doc.moveDown(0.6);
 
+						// Separator between File Stats and Tracked Code Blocks
+						{
+							const left = doc.page.margins.left;
+							const right = doc.page.width - doc.page.margins.right;
+							const yLine = doc.y;
+							doc.save();
+							doc
+								.moveTo(left, yLine)
+								.lineTo(right, yLine)
+								.strokeColor('rgba(0,0,0,0.15)')
+								.lineWidth(1)
+								.stroke();
+							doc.restore();
+							doc.moveDown(0.8);
+						}
+
 						// Tracked blocks
 						doc.fontSize(14).text('Tracked Code Blocks');
 						doc.moveDown(0.5);
