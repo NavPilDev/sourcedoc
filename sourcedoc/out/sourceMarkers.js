@@ -36,43 +36,59 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SourceMarkers = void 0;
 const vscode = __importStar(require("vscode"));
 const sourcePasteModel_1 = require("./sourcePasteModel");
-function buildHoverMessage(recordedAt, source, reason, range, ai) {
-    const payload = {
-        Source: source,
-        Time: (0, sourcePasteModel_1.formatTime)(recordedAt),
-        Reason: reason || '(none)',
-        AI: ai || undefined,
-        Bounds: {
-            startLine: range.start.line + 1,
-            startCharacter: range.start.character + 1,
-            endLine: range.end.line + 1,
-            endCharacter: range.end.character + 1,
-        },
-    };
-    const ms = new vscode.MarkdownString();
-    ms.appendCodeblock(JSON.stringify(payload, null, 2), 'json');
+function escapeMarkdown(text) {
+    return text.replace(/[`*_{}[\]()#+\-.!]/g, '\\$&');
+}
+function truncate(text, max = 200) {
+    if (!text)
+        return '';
+    return text.length > max ? text.slice(0, max) + '...' : text;
+}
+function buildHoverMessage(annotation) {
+    const lines = [];
+    lines.push(`**AI Annotation**`);
+    lines.push(`**Time:** ${(0, sourcePasteModel_1.formatTime)(annotation.recordedAt)}`);
+    if (annotation.source.tool) {
+        lines.push(`**Tool:** ${escapeMarkdown(annotation.source.tool)}`);
+    }
+    if (annotation.source.model) {
+        lines.push(`**Model:** ${escapeMarkdown(annotation.source.model)}`);
+    }
+    if (annotation.source.prompt) {
+        const safePrompt = escapeMarkdown(truncate(annotation.source.prompt));
+        lines.push(`**Prompt:**`);
+        lines.push('```');
+        lines.push(safePrompt);
+        lines.push('```');
+    }
+    if (annotation.source.notes) {
+        lines.push(`**Notes:** ${escapeMarkdown(annotation.source.notes)}`);
+    }
+    if (annotation.textPreview) {
+        lines.push(`---`);
+        lines.push(`**Preview:**`);
+        lines.push(`\`${escapeMarkdown(annotation.textPreview)}\``);
+    }
+    lines.push(`---`);
+    lines.push(`[Edit Annotation](command:sourcedoc.annotateExisting?${encodeURIComponent(JSON.stringify(annotation.id))})`);
+    lines.push(`[Delete Annotation](command:sourcedoc.deleteAnnotation?${encodeURIComponent(JSON.stringify(annotation.id))})`);
+    const ms = new vscode.MarkdownString(lines.join('\n\n'));
     ms.isTrusted = true;
     return ms;
 }
 class SourceMarkers {
-    decorationType;
-    aiDecorationType;
+    aiDecoration;
     model;
     modelListener;
+    autoHide = false;
+    revealByUri = new Map();
     constructor(model) {
         this.model = model;
-        this.decorationType = vscode.window.createTextEditorDecorationType({
-            isWholeLine: true,
-            backgroundColor: 'rgba(80, 200, 255, 0.12)',
-            overviewRulerColor: 'rgba(80, 200, 255, 0.45)',
+        this.aiDecoration = vscode.window.createTextEditorDecorationType({
+            backgroundColor: 'rgba(160, 110, 255, 0.14)',
+            overviewRulerColor: 'rgba(160, 110, 255, 0.75)',
             overviewRulerLane: vscode.OverviewRulerLane.Left,
-        });
-        this.aiDecorationType = vscode.window.createTextEditorDecorationType({
-            isWholeLine: true,
-            backgroundColor: 'rgba(160, 110, 255, 0.06)',
-            overviewRulerColor: 'rgba(160, 110, 255, 0.55)',
-            overviewRulerLane: vscode.OverviewRulerLane.Left,
-            border: '1px solid rgba(160, 110, 255, 0.35)',
+            borderRadius: '3px',
         });
         this.modelListener = model.onDidChange((uri) => {
             this.refreshEditorsForDocument(uri);
@@ -80,22 +96,50 @@ class SourceMarkers {
     }
     dispose() {
         this.modelListener.dispose();
-        this.decorationType.dispose();
-        this.aiDecorationType.dispose();
+        this.aiDecoration.dispose();
+        for (const entry of this.revealByUri.values()) {
+            clearTimeout(entry.timeout);
+        }
+        this.revealByUri.clear();
+    }
+    setAutoHide(enabled) {
+        this.autoHide = enabled;
+        this.refreshAllVisibleEditors();
+    }
+    revealOnce(uri, range, ms = 1200) {
+        const key = uri.toString();
+        const prev = this.revealByUri.get(key);
+        if (prev) {
+            clearTimeout(prev.timeout);
+        }
+        const timeout = setTimeout(() => {
+            this.revealByUri.delete(key);
+            this.refreshEditorsForDocument(uri);
+        }, ms);
+        this.revealByUri.set(key, { range, timeout });
+        this.refreshEditorsForDocument(uri);
     }
     refreshEditor(editor) {
-        const pastes = this.model.getPastes(editor.document.uri);
-        const options = pastes.map((p) => ({
-            range: p.range,
-            hoverMessage: buildHoverMessage(p.recordedAt, p.source, p.reason, p.range, p.ai),
-        }));
-        editor.setDecorations(this.decorationType, options);
-        const aiOptions = pastes
-            .filter((p) => Boolean(p.ai))
-            .map((p) => ({
-            range: p.range,
-        }));
-        editor.setDecorations(this.aiDecorationType, aiOptions);
+        const annotations = this.model.getAnnotations(editor.document.uri);
+        let options = [];
+        if (!this.autoHide) {
+            options = annotations.map((annotation) => ({
+                range: annotation.range,
+                hoverMessage: buildHoverMessage(annotation),
+            }));
+        }
+        else {
+            const revealed = this.revealByUri.get(editor.document.uri.toString());
+            if (revealed) {
+                options = [
+                    {
+                        range: revealed.range,
+                        hoverMessage: new vscode.MarkdownString('SourceDoc: marker revealed for navigation.', true),
+                    },
+                ];
+            }
+        }
+        editor.setDecorations(this.aiDecoration, options);
     }
     refreshEditorsForDocument(uri) {
         for (const editor of vscode.window.visibleTextEditors) {

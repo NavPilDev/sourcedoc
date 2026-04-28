@@ -4,6 +4,7 @@ import { SourceMarkers } from './sourceMarkers';
 import { SourceWebviewViewProvider } from './sourceWebviewViewProvider';
 import PDFDocument from 'pdfkit';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 // =========================
 // PASTE DETECTION
@@ -654,7 +655,14 @@ export function activate(context: vscode.ExtensionContext): void {
 				context.workspaceState.get<ChartMode>('sourcedoc.export.chart.models', 'donut');
 
 			const fileLabel = vscode.workspace.asRelativePath(uri);
-			const computedDefaultName = (fileLabel.split(/[\\/]/).pop() || 'sourcedoc') + '.pdf';
+			const editedFileName = path.basename(fileLabel || 'sourcedoc');
+			const editedBaseName = path.basename(editedFileName, path.extname(editedFileName)) || 'sourcedoc';
+
+			const now = new Date();
+			const pad2 = (n: number): string => String(n).padStart(2, '0');
+			const stampDate = `${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}-${now.getFullYear()}`;
+			const stampTime = `${pad2(now.getHours())}-${pad2(now.getMinutes())}-${pad2(now.getSeconds())}`;
+			const computedDefaultName = `${editedBaseName} ${stampDate} ${stampTime}.pdf`;
 			const requestedName =
 				typeof exportArgs?.filename === 'string' && exportArgs.filename.trim()
 					? exportArgs.filename.trim()
@@ -727,6 +735,130 @@ export function activate(context: vscode.ExtensionContext): void {
 							if (doc.y + height > bottom) {
 								doc.addPage();
 							}
+						}
+
+						function normalizeForDiff(text: string): string {
+							// Ignore whitespace-only differences (indentation/newlines).
+							const lf = String(text || '').replace(/\r\n?/g, '\n');
+							const trimmedLines = lf
+								.split('\n')
+								.map((line) => line.replace(/\s+$/g, ''))
+								.join('\n');
+							return trimmedLines.replace(/\s+/g, ' ').trim();
+						}
+
+						function isMeaningfullyChanged(original: string, current: string): boolean {
+							return normalizeForDiff(original) !== normalizeForDiff(current);
+						}
+
+						function addCodeBlockPageIfNeeded(minHeight: number): void {
+							ensureSpace(minHeight);
+						}
+
+						function renderPaginatedCodeBlock(title: string, code: string, opts?: { bg?: string; fg?: string }): void {
+							const left = doc.page.margins.left;
+							const pageBottom = doc.page.height - doc.page.margins.bottom;
+							const boxLeft = left;
+							const boxWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+							const outerPad = 8;
+							const innerPadX = 10;
+							const innerPadY = 8;
+							const labelGap = 4;
+
+							const bg = opts?.bg ?? '#2d2a2e';
+							const fg = opts?.fg ?? '#fcfcfa';
+
+							// Label
+							addCodeBlockPageIfNeeded(18);
+							doc.x = left + 8;
+							doc.font('Helvetica').fontSize(9).fillColor('#444444').text(title);
+							doc.moveDown(0.15);
+
+							const lines = String(code || '').replace(/\r\n?/g, '\n').split('\n');
+							if (lines.length === 0 || (lines.length === 1 && !lines[0])) {
+								// Render an empty-ish block to keep layout consistent.
+								const minH = 22;
+								addCodeBlockPageIfNeeded(minH + outerPad);
+								const boxTop = doc.y + labelGap;
+								doc.save();
+								doc.rect(boxLeft, boxTop, boxWidth, minH).fill(bg);
+								doc.restore();
+								doc.fillColor(fg).font('Courier').fontSize(9);
+								doc.text('(empty)', boxLeft + innerPadX, boxTop + innerPadY, { width: boxWidth - innerPadX * 2 });
+								doc.fillColor('#000000').font('Helvetica').fontSize(11);
+								doc.y = boxTop + minH + 6;
+								doc.x = left + 8;
+								return;
+							}
+
+							// Configure code font once for measurements.
+							doc.font('Courier').fontSize(9).fillColor(fg);
+
+							let idx = 0;
+							while (idx < lines.length) {
+								// Page-aware sizing: leave room for padding + a tiny minimum box height.
+								const minBoxH = 22;
+								const minNeeded = minBoxH + outerPad;
+								if (doc.y + minNeeded > pageBottom) {
+									doc.addPage();
+									doc.x = left + 8;
+								}
+
+								const boxTop = doc.y + labelGap;
+								const availableH = pageBottom - boxTop - outerPad;
+								const contentW = boxWidth - innerPadX * 2;
+								const contentH = Math.max(0, availableH - innerPadY * 2);
+
+								// Find the largest chunk (in whole lines) that fits, using PDFKit measurement (accounts for wrapping).
+								let lo = 1;
+								let hi = lines.length - idx;
+								let best = 1;
+
+								while (lo <= hi) {
+									const mid = (lo + hi) >> 1;
+									const candidate = lines.slice(idx, idx + mid).join('\n');
+									const h = doc.heightOfString(candidate, { width: contentW });
+									if (h <= contentH) {
+										best = mid;
+										lo = mid + 1;
+									} else {
+										hi = mid - 1;
+									}
+								}
+
+								// Safety: if even 1 line doesn't fit (very small remaining space), page break and retry.
+								const candidate = lines.slice(idx, idx + best).join('\n');
+								const measuredH = doc.heightOfString(candidate, { width: contentW });
+								if (measuredH > contentH && contentH > 0) {
+									doc.addPage();
+									doc.x = left + 8;
+									continue;
+								}
+
+								const boxH = Math.max(minBoxH, Math.min(availableH, measuredH + innerPadY * 2));
+
+								doc.save();
+								doc.rect(boxLeft, boxTop, boxWidth, boxH).fill(bg);
+								doc.restore();
+
+								// pdfkit's .fill(bg) changes the current fill color; ensure code stays white-on-black.
+								doc.fillColor(fg);
+								doc.text(candidate, boxLeft + innerPadX, boxTop + innerPadY, { width: contentW });
+
+								doc.y = boxTop + boxH + 6;
+								doc.x = left + 8;
+
+								idx += best;
+
+								// If we still have remaining lines, add a page to keep the flow clear.
+								if (idx < lines.length && doc.y > pageBottom - 40) {
+									doc.addPage();
+									doc.x = left + 8;
+								}
+							}
+
+							// Restore normal font/color for subsequent sections.
+							doc.fillColor('#000000').font('Helvetica').fontSize(11);
 						}
 
 						function drawBarChart(items: Array<{ label: string; value: number }>, width = 300): number {
@@ -951,20 +1083,22 @@ export function activate(context: vscode.ExtensionContext): void {
 							doc.fillColor('#000000');
 							doc.moveDown(0.2);
 
-							// Preview code block (Monokai-ish)
-							const previewText = a.textPreview || '(No preview available)';
-							const boxLeft = left;
-							const boxWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-							const boxTop = doc.y + 4;
-							const boxHeight = 58;
-							doc.save();
-							doc.rect(boxLeft, boxTop, boxWidth, boxHeight).fill('#2d2a2e');
-							doc.restore();
-							doc.fillColor('#fcfcfa').font('Courier').fontSize(9);
-							doc.text(previewText, boxLeft, boxTop, { width: boxWidth, height: boxHeight });
-							doc.fillColor('#000000').font('Helvetica').fontSize(11);
-							doc.y = boxTop + boxHeight + 6;
-							doc.x = left + 8;
+							// Original + Modified code blocks (full text, paginated)
+							const original = a.originalText || '';
+							const current = a.fullText || '';
+							const changed = isMeaningfullyChanged(original, current);
+
+							renderPaginatedCodeBlock('Original', original);
+
+							if (changed) {
+								renderPaginatedCodeBlock('Modified', current);
+							} else {
+								ensureSpace(18);
+								doc.font('Helvetica-Oblique').fontSize(10).fillColor('#555555').text('no changes were made', left + 8, doc.y);
+								doc.fillColor('#000000').font('Helvetica').fontSize(11);
+								doc.moveDown(0.4);
+								doc.x = left + 8;
+							}
 
 							if (a.source.prompt) {
 								doc.fontSize(10).fillColor('#444444').text('Prompt:');
@@ -1008,7 +1142,10 @@ export function activate(context: vscode.ExtensionContext): void {
 				return;
 			}
 
-			vscode.window.showInformationMessage('SourceDoc: PDF exported.');
+			const picked = await vscode.window.showInformationMessage('SourceDoc: PDF exported.', 'Open PDF');
+			if (picked === 'Open PDF') {
+				await vscode.env.openExternal(saveUri);
+			}
 		})
 	);
 

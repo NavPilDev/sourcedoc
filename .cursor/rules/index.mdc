@@ -8,11 +8,10 @@ VSCode Extension Api Documentation:
 VSCode Extension Samples: https://github.com/microsoft/vscode-extension-samples
 
 --------------------------------
-------- Components ------------
+-------- Components ------------
 --------------------------------
 
 System Architecture 
- 
 
 Comp 1: IDE Extension: 
 
