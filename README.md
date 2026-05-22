@@ -1,5 +1,6 @@
 # SourceDoc | Realtime Source Documentation + AI Footprints
 
+<img width="1928" height="1088" alt="sourceDoc" src="https://github.com/user-attachments/assets/d199261c-0119-4403-b835-34a525c475c1" />
 
 This project is a VSCode/cursor extension paired with a living program that will track copy/paste information and relay source information within an IDE. This project also tracks users' AI footprints 
 
